@@ -223,7 +223,7 @@ def main():
 
 def run_interactive_mode():
     """Run the program in interactive mode, prompting the user for input."""
-    print("\033[34m" + """
+    print("\033[34m" + r"""
                                                                                                                                                                                                         
   ______ _     _ _______ ______  ______     _______ ______  _______ _______ _______  ______ 
  / _____|_)   (_|_______|_____ \(_____ \   (_______|_____ \(_______|_______|_______)/ _____)
