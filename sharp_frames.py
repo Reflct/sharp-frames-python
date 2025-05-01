@@ -275,7 +275,7 @@ def run_interactive_mode():
     # Set defaults first
     num_frames = 300
     min_buffer = 3
-    batch_size = 5
+    batch_size = 2
     batch_buffer = 0
     outlier_window_size = 15
     outlier_sensitivity = 50
@@ -285,7 +285,7 @@ def run_interactive_mode():
         num_frames = get_valid_int("Enter number of frames/images to select", min_value=1, default=300)
         min_buffer = get_valid_int("Enter minimum buffer between frames/images", min_value=0, default=3)
     elif selection_method == "batched":
-        batch_size = get_valid_int("Enter batch size", min_value=1, default=5)
+        batch_size = get_valid_int("Enter batch size", min_value=1, default=2)
         batch_buffer = get_valid_int("Enter batch buffer (frames/images to skip between batches)", min_value=0, default=0)
     elif selection_method == "outlier-removal":
         outlier_window_size = get_valid_int("Enter window size for comparison", min_value=3, max_value=30, default=15)
