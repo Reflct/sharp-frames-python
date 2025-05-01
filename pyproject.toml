@@ -33,10 +33,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/reflct/sharp-frames"
-Documentation = "https://github.com/reflct/sharp-frames#readme"
-Issues = "https://github.com/reflct/sharp-frames/issues"
-Changelog = "https://github.com/reflct/sharp-frames/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/reflct/sharp-frames-python"
+Documentation = "https://github.com/reflct/sharp-frames-python#readme"
+Changelog = "https://github.com/reflct/sharp-frames-python/blob/main/CHANGELOG.md"
 
 [project.scripts]
 sharp-frames = "sharp_frames.sharp_frames:main"
