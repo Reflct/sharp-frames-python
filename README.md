@@ -5,15 +5,15 @@ Extracts frames from a video or processes images from a directory, scores them f
 ## Requirements
 
 - Python 3.6 or higher
-- OpenCV (`opencv-python`)
-- NumPy
-- tqdm (for progress visualization)
+- OpenCV (`opencv-python`) - Installed automatically with pip
+- NumPy - Installed automatically with pip
+- tqdm (for progress visualization) - Installed automatically with pip
 - FFmpeg (required **only** for video input, must be installed and in your system PATH)
 - FFprobe (optional, recommended for video input to determine duration, must be in PATH)
 
 ## Installation
 
-### Option 1: Install via pip (Recommended)
+### Install via pip
 
 ```bash
 pip install sharp-frames
@@ -31,33 +31,11 @@ pipx install sharp-frames
 - **macOS** (with Homebrew): `brew install ffmpeg`
 - **Linux** (Debian/Ubuntu): `sudo apt update && sudo apt install ffmpeg`
 
-### Option 2: Manual Installation
-
-1.  Make sure you have Python 3.6+ installed.
-2.  Clone this repository or download the source code.
-3.  Install required Python packages:
-    ```bash
-    pip install -r requirements.txt
-    ```
-4.  Install FFmpeg (if processing videos):
-    *   **Windows**: Download from [FFmpeg website](https://ffmpeg.org/download.html) and add `ffmpeg.exe` (and optionally `ffprobe.exe`) to your PATH.
-    *   **macOS** (with Homebrew): `brew install ffmpeg`
-    *   **Linux** (Debian/Ubuntu): `sudo apt update && sudo apt install ffmpeg`
-
 ## Usage
-
-### If installed via pip or pipx
 
 ```bash
 sharp-frames --interactive  # Interactive mode
 sharp-frames <input_path> <output_directory> [options]  # With arguments
-```
-
-### If installed manually
-
-```bash
-python sharp_frames.py  # Interactive mode
-python sharp_frames.py <input_path> <output_directory> [options]  # With arguments
 ```
 
 ### Arguments
@@ -82,7 +60,7 @@ python sharp_frames.py <input_path> <output_directory> [options]  # With argumen
 
     -   **For `batched`:** Divides the frames/images into batches of a specified size (`--batch-size`) and selects the single sharpest frame from each batch. A buffer (`--batch-buffer`) can be added to skip frames between batches.
         -   `--batch-size <int>`: Number of frames/images in each analysis batch (default: 5). The best frame from each batch is selected.
-        -   `--batch-buffer <int>`: Number of frames/images to skip between batches (default: 0).
+        -   `--batch-buffer <int>`: Number of frames/images to skip between batches (default: 2).
 
     -   **For `outlier-removal`:** Analyzes each frame's sharpness relative to its neighbors within a window (`--outlier-window-size`). Frames significantly less sharp than their neighbors (controlled by `--outlier-sensitivity`) are considered outliers and are **not** selected. This method keeps all frames *except* those identified as outliers.
         -   `--outlier-window-size <int>`: Number of neighboring frames to compare against (default: 15, must be odd).
@@ -102,14 +80,8 @@ python sharp_frames.py <input_path> <output_directory> [options]  # With argumen
 
 ### Basic video usage (best-n)
 
-Using pip-installed command:
 ```bash
 sharp-frames my_video.mp4 ./selected_video_frames
-```
-
-Using manual installation:
-```bash
-python sharp_frames.py my_video.mp4 ./selected_video_frames
 ```
 (Extracts 10fps, selects 300 best frames with buffer 3)
 
