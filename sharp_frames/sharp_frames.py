@@ -164,7 +164,7 @@ def main():
     parser.add_argument("--batch-size", type=int, default=5,
                        help="Number of frames in each batch for batch selection (default: 5)")
     parser.add_argument("--batch-buffer", type=int, default=2,
-                       help="Number of frames to skip between batches (default: 0)")
+                       help="Number of frames to skip between batches (default: 2)")
     parser.add_argument("--outlier-window-size", type=int, default=15,
                        help="Number of neighboring frames to compare for outlier detection (default: 15)")
     parser.add_argument("--outlier-sensitivity", type=int, default=50,
