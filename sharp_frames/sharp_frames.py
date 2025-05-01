@@ -4,7 +4,7 @@ import os
 import sys
 from typing import List, Dict, Any, Tuple, Set
 # Import the core processor class and custom exception
-from sharp_frames_processor import SharpFrames, ImageProcessingError
+from .sharp_frames_processor import SharpFrames, ImageProcessingError
 
 # Helper functions for interactive mode
 def get_valid_file_path(prompt: str, must_exist: bool = True) -> str:

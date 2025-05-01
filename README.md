@@ -1,6 +1,6 @@
 # Sharp Frames Python
 
-Extracts frames from a video or processes images from a directory, scores them for sharpness, and selects the best frames based on various methods. This script is using the same selection methods as found in the Sharp Frames application by [Reflct](https://reflct.app). For the full version, go to [Sharp Frames](https://sharp-frames.reflct.app), or join our [discord](https://discord.gg/rfYNxSw3yx) for access to the beta windows version.
+Extracts frames from a video or processes images from a directory, scores them for sharpness, and selects the best frames based on various methods. This script is using the same selection methods as found in the Sharp Frames application by [Reflct](https://reflct.app). For the full version, go to [Sharp Frames](https://sharp-frames.reflct.app), or join our [Discord](https://discord.gg/rfYNxSw3yx) for access to the beta windows version.
 
 ## Requirements
 
@@ -13,25 +13,51 @@ Extracts frames from a video or processes images from a directory, scores them f
 
 ## Installation
 
+### Option 1: Install via pip (Recommended)
+
+```bash
+pip install sharp-frames
+```
+
+Or use pipx for an isolated installation:
+
+```bash
+pipx install sharp-frames
+```
+
+**Important**: FFmpeg must be installed separately for video processing. The pip/pipx installation does NOT include FFmpeg.
+
+- **Windows**: Download from [FFmpeg website](https://ffmpeg.org/download.html) and add `ffmpeg.exe` to your PATH.
+- **macOS** (with Homebrew): `brew install ffmpeg`
+- **Linux** (Debian/Ubuntu): `sudo apt update && sudo apt install ffmpeg`
+
+### Option 2: Manual Installation
+
 1.  Make sure you have Python 3.6+ installed.
-2.  Install required Python packages:
+2.  Clone this repository or download the source code.
+3.  Install required Python packages:
     ```bash
     pip install -r requirements.txt
     ```
-3.  Install FFmpeg (if processing videos):
+4.  Install FFmpeg (if processing videos):
     *   **Windows**: Download from [FFmpeg website](https://ffmpeg.org/download.html) and add `ffmpeg.exe` (and optionally `ffprobe.exe`) to your PATH.
     *   **macOS** (with Homebrew): `brew install ffmpeg`
     *   **Linux** (Debian/Ubuntu): `sudo apt update && sudo apt install ffmpeg`
 
 ## Usage
 
-Run interactively (recommended, it's easy):
+### If installed via pip or pipx
+
 ```bash
-python sharp_frames.py
+sharp-frames --interactive  # Interactive mode
+sharp-frames <input_path> <output_directory> [options]  # With arguments
 ```
-Or run with arguments/options
+
+### If installed manually
+
 ```bash
-python sharp_frames.py <input_path> <output_directory> [options]
+python sharp_frames.py  # Interactive mode
+python sharp_frames.py <input_path> <output_directory> [options]  # With arguments
 ```
 
 ### Arguments
@@ -76,6 +102,12 @@ python sharp_frames.py <input_path> <output_directory> [options]
 
 ### Basic video usage (best-n)
 
+Using pip-installed command:
+```bash
+sharp-frames my_video.mp4 ./selected_video_frames
+```
+
+Using manual installation:
 ```bash
 python sharp_frames.py my_video.mp4 ./selected_video_frames
 ```
@@ -84,28 +116,28 @@ python sharp_frames.py my_video.mp4 ./selected_video_frames
 ### Directory usage (best-n)
 
 ```bash
-python sharp_frames.py ./image_folder ./selected_dir_images --num-frames 50 --min-buffer 1
+sharp-frames ./image_folder ./selected_dir_images --num-frames 50 --min-buffer 1
 ```
 (Processes images in `./image_folder`, selects the best 50 with buffer 1)
 
 ### Video usage (batched)
 
 ```bash
-python sharp_frames.py my_video.mp4 ./selected_batched --selection-method batched --batch-size 10 --batch-buffer 2
+sharp-frames my_video.mp4 ./selected_batched --selection-method batched --batch-size 10 --batch-buffer 2
 ```
 (Selects the best frame from batches of 10, skipping 2 frames between batches)
 
 ### Directory usage (outlier removal)
 
 ```bash
-python sharp_frames.py ./image_folder ./selected_outliers --selection-method outlier-removal --outlier-sensitivity 75
+sharp-frames ./image_folder ./selected_outliers --selection-method outlier-removal --outlier-sensitivity 75
 ```
 (Processes images, removing frames considered outliers with 75% sensitivity)
 
 ### Interactive mode
 
 ```bash
-python sharp_frames.py --interactive
+sharp-frames --interactive
 ```
 (Prompts for input path, output path, and all relevant options)
 

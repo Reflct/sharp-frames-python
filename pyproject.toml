@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sharp-frames"
+dynamic = ["version"]
+description = "Extract, score, and select the best frames from a video or image directory"
+readme = "README.md"
+authors = [
+    {name = "Reflct.app", email = "info@reflct.app"}
+]
+license = {text = "MIT"}
+requires-python = ">=3.7"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.7",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Topic :: Multimedia :: Video",
+    "Topic :: Multimedia :: Graphics",
+    "Intended Audience :: End Users/Desktop",
+]
+keywords = ["video", "frames", "sharpness", "image-processing"]
+dependencies = [
+    "opencv-python>=4.5.0",
+    "numpy>=1.19.0",
+    "tqdm>=4.64.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/reflct/sharp-frames"
+Documentation = "https://github.com/reflct/sharp-frames#readme"
+Issues = "https://github.com/reflct/sharp-frames/issues"
+Changelog = "https://github.com/reflct/sharp-frames/blob/main/CHANGELOG.md"
+
+[project.scripts]
+sharp-frames = "sharp_frames.sharp_frames:main"
+
+# External dependencies that cannot be installed automatically by pip
+[tool.sharp-frames.external-dependencies]
+ffmpeg = {description = "Required for video processing", url = "https://ffmpeg.org/download.html"}
+ffprobe = {description = "Recommended for video duration detection (included with FFmpeg)", url = "https://ffmpeg.org/download.html"}
+
+[tool.setuptools]
+package-dir = {"" = "."}
+
+[tool.setuptools.dynamic]
+version = {attr = "sharp_frames.__version__"}
+
+[tool.setuptools.packages.find]
+include = ["sharp_frames", "sharp_frames.*"] 

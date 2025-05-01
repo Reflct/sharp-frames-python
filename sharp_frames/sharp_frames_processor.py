@@ -16,7 +16,7 @@ import concurrent.futures # Add concurrent.futures import
 from tqdm import tqdm
 
 # Import selection strategy functions
-from selection_methods import (
+from .selection_methods import (
     select_best_n_frames,
     select_batched_frames,
     select_outlier_removal_frames
