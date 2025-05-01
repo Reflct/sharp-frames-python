@@ -66,10 +66,6 @@ sharp-frames <input_path> <output_directory> [options]  # With arguments
         -   `--outlier-window-size <int>`: Number of neighboring frames to compare against (default: 15, must be odd).
         -   `--outlier-sensitivity <int>`: How aggressively to remove outliers (0-100, higher means more removal, default: 50).
 
-### Safety Features
-
--   **Output Directory Check**: Warns if the output directory isn't empty and prompts for confirmation (unless `--force-overwrite` is used).
--   **Dependency Checks**: Verifies required dependencies (Python packages, FFmpeg for video) before starting.
 
 ### Cancelling the Process
 
