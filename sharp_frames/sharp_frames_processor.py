@@ -621,12 +621,6 @@ class SharpFrames:
 
     def _save_frames(self, selected_frames: List[Dict[str, Any]], progress_bar=None) -> None:
         """Save selected frames/images to output directory."""
-        # DEBUG: Print information about input type and processing
-        print(f"\nDEBUG INFO:")
-        print(f"Input type: {self.input_type}")
-        print(f"First few original IDs: {[frame['id'] for frame in selected_frames[:3]]}")
-        print(f"Using modified _save_frames method with filename preservation\n")
-        
         metadata_list = []
         for i, frame_data in enumerate(selected_frames):
             src_path = frame_data["path"]
@@ -637,18 +631,12 @@ class SharpFrames:
             # Use original filename for directory input, sequential naming for video input
             if self.input_type == "directory":
                 filename = original_id  # Use the original filename directly
-                # Only print debug for first few to avoid cluttering output
-                if i < 5:
-                    print(f"DEBUG: Using original filename: {original_id} (i={i})")
             else:
                 # Use the defined constant format string for video frames
                 filename = self.OUTPUT_FILENAME_FORMAT.format(
                     seq=i+1,
                     ext=self.output_format
                 )
-                # Only print debug for first few to avoid cluttering output
-                if i < 5:
-                    print(f"DEBUG: Using sequential filename: {filename} (original={original_id})")
             dst_path = os.path.join(self.output_dir, filename)
 
             try:
