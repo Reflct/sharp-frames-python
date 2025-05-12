@@ -47,7 +47,10 @@ class SharpFrames:
 
                  # --- Parameters for 'outlier-removal' selection ---
                  outlier_window_size: int = 15,
-                 outlier_sensitivity: int = 50):
+                 outlier_sensitivity: int = 50,
+                 
+                 # --- Parameters for image resizing ---
+                 width: int = 0):
 
         # --- Constants ---
         # Filename format for output files
@@ -78,6 +81,12 @@ class SharpFrames:
         self.batch_buffer = batch_buffer
         self.outlier_window_size = outlier_window_size
         self.outlier_sensitivity = outlier_sensitivity
+        
+        # New property for image resizing
+        # Ensure width is non-negative (treat negative values as 0)
+        self.width = max(0, width)
+        if width < 0:
+            print(f"Warning: Negative width value ({width}) treated as 0 (no resizing)")
         
     def _setup(self) -> bool:
         """Perform initial setup checks and directory creation."""
@@ -358,16 +367,30 @@ class SharpFrames:
         # Set a timeout threshold for the process in case it hangs
         process_timeout_seconds = 3600 # 1 hour timeout for FFmpeg process
         
+        # Build the video filters string
+        vf_filters = []
+        vf_filters.append(f"fps={self.fps}")
+        
+        # Add scaling filter if width is specified
+        if self.width > 0:
+            vf_filters.append(f"scale={self.width}:-2")  # -2 maintains aspect ratio and ensures even height
+            
+        # Join all filters with commas
+        vf_string = ",".join(vf_filters)
+        
         command = [
             "ffmpeg",
             "-i", self.input_path,
-            "-vf", f"fps={self.fps}",
+            "-vf", vf_string,
             "-q:v", "1",  # Highest quality
             "-threads", str(cpu_count()),
             "-hide_banner", # Hide verbose info
             "-loglevel", "warning", # Show errors and warnings
             output_pattern
         ]
+        
+        # Print the FFmpeg command for debugging
+        print(f"FFmpeg command: {' '.join(command)}")
         
         # Estimate total frames if duration is available
         estimated_total_frames = None
@@ -384,7 +407,7 @@ class SharpFrames:
         progress_bar = tqdm(total=estimated_total_frames, desc=progress_desc, unit="frame")
         
         process = None
-        stderr_output = ""
+        stderr_chunks = []
         try:
             # Start the FFmpeg process
             process = subprocess.Popen(
@@ -396,8 +419,28 @@ class SharpFrames:
                 universal_newlines=True
             )
 
+            # Setup non-blocking reading of stderr
+            import threading
+            import queue
+            
+            stderr_queue = queue.Queue()
+            
+            def read_stderr():
+                while True:
+                    line = process.stderr.readline()
+                    if not line and process.poll() is not None:
+                        break
+                    if line:
+                        stderr_queue.put(line)
+            
+            # Start thread to read stderr
+            stderr_thread = threading.Thread(target=read_stderr)
+            stderr_thread.daemon = True
+            stderr_thread.start()
+
             last_file_count = 0
             start_time = time.time()
+            last_stderr_check = time.time()
 
             # Monitor process completion and update progress based on file count
             while process.poll() is None:
@@ -416,6 +459,16 @@ class SharpFrames:
                         else:
                             progress_bar.set_description(f"{progress_desc}: {file_count} frames")
 
+                    # Check and collect stderr (limit how often we process to avoid slowdown)
+                    current_time = time.time()
+                    if current_time - last_stderr_check > 1.0:  # Check every second
+                        while not stderr_queue.empty():
+                            line = stderr_queue.get_nowait()
+                            stderr_chunks.append(line)
+                            # Only log severe errors, ignore aspect ratio warnings
+                            if "Cannot store exact aspect ratio" not in line and "[warning]" not in line.lower():
+                                print(f"FFmpeg: {line.strip()}")
+                        last_stderr_check = current_time
 
                     # Check for process timeout
                     if time.time() - start_time > process_timeout_seconds:
@@ -430,7 +483,7 @@ class SharpFrames:
 
                 # Small sleep to prevent high CPU usage and allow interrupts
                 try:
-                    time.sleep(0.5) # Check every half second
+                    time.sleep(0.1) # Check more frequently for better responsiveness
                 except KeyboardInterrupt:
                     print("Keyboard interrupt received. Terminating FFmpeg...")
                     if process:
@@ -438,14 +491,11 @@ class SharpFrames:
                     progress_bar.close()
                     raise
 
-            # Process finished, capture remaining stderr and check return code
-            try:
-                stdout_output, stderr_output = process.communicate(timeout=15) # Short timeout for final communication
-            except subprocess.TimeoutExpired:
-                print("FFmpeg timed out during final communication. Killing process.")
-                process.kill()
-                stdout_output, stderr_output = process.communicate() # Try one last time
-
+            # Collect any remaining stderr
+            while not stderr_queue.empty():
+                stderr_chunks.append(stderr_queue.get_nowait())
+            
+            # Process finished, check return code
             return_code = process.returncode
             
             # Update progress bar to completion or final count
@@ -464,8 +514,8 @@ class SharpFrames:
             # Check result
             if return_code != 0:
                 error_message = f"FFmpeg failed with exit code {return_code}."
-                if stderr_output:
-                    error_message += f"FFmpeg stderr:{stderr_output.strip()}"
+                if stderr_chunks:
+                    error_message += f"FFmpeg stderr: {''.join(stderr_chunks)}"
                 raise Exception(error_message)
 
             return True
@@ -497,8 +547,8 @@ class SharpFrames:
             if process and process.poll() is None:
                 process.terminate()
             # Include stderr in exception if available
-            if stderr_output:
-                 e = Exception(f"{str(e)}FFmpeg stderr:{stderr_output.strip()}")
+            if stderr_chunks:
+                 e = Exception(f"{str(e)}FFmpeg stderr:{''.join(stderr_chunks)}")
             raise e # Re-raise the exception
     
     def _get_image_paths_from_dir(self) -> List[str]:
@@ -640,9 +690,29 @@ class SharpFrames:
             dst_path = os.path.join(self.output_dir, filename)
 
             try:
-                shutil.copy2(src_path, dst_path)
+                # If width is set and we're in directory mode (video mode already handles this during extraction)
+                if self.width > 0 and self.input_type == "directory":
+                    # Load the image with OpenCV
+                    img = cv2.imread(src_path)
+                    if img is None:
+                        raise ImageProcessingError(f"Failed to read image for resizing: {src_path}")
+                    
+                    # Calculate height to maintain aspect ratio
+                    height = int(img.shape[0] * (self.width / img.shape[1]))
+                    # Ensure height is even
+                    if height % 2 != 0:
+                        height += 1
+                    
+                    # Resize the image
+                    resized_img = cv2.resize(img, (self.width, height), interpolation=cv2.INTER_AREA)
+                    
+                    # Save the resized image
+                    cv2.imwrite(dst_path, resized_img)
+                else:
+                    # Normal copy for non-resized or video frames
+                    shutil.copy2(src_path, dst_path)
             except Exception as e:
-                 print(f"Error copying {src_path} to {dst_path}: {e}")
+                 print(f"Error saving {src_path} to {dst_path}: {e}")
                  # Optionally skip this frame and continue, or re-raise
                  continue
 
@@ -665,6 +735,8 @@ class SharpFrames:
                     "input_type": self.input_type,
                     "total_selected": len(metadata_list),
                     "selection_method": self.selection_method,
+                    # Include resize width in metadata if set
+                    "resize_width": self.width if self.width > 0 else None,
                     # Include method-specific params in metadata
                     **self._get_method_params_for_metadata(),
                     "selected_items": metadata_list
@@ -675,6 +747,10 @@ class SharpFrames:
     def _get_method_params_for_metadata(self) -> Dict[str, Any]:
         """Returns parameters relevant to the current selection method for metadata."""
         params = {}
+        # Include width parameter regardless of method (if set)
+        if self.width > 0:
+            params["resize_width"] = self.width
+            
         if self.selection_method == "best-n":
             params["num_frames_requested"] = self.num_frames
             params["min_buffer"] = self.min_buffer

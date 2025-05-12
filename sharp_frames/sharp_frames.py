@@ -169,6 +169,8 @@ def main():
                        help="Number of neighboring frames to compare for outlier detection (default: 15)")
     parser.add_argument("--outlier-sensitivity", type=int, default=50,
                        help="Sensitivity of outlier detection, 0-100 (default: 50)")
+    parser.add_argument("--width", type=int, default=0,
+                       help="Width to resize output images (height will be adjusted proportionally, 0 for no resizing)")
     parser.add_argument("--interactive", action="store_true", help="Run in interactive mode, prompting for options")
 
     args = parser.parse_args()
@@ -215,7 +217,8 @@ def main():
         batch_size=args.batch_size,
         batch_buffer=args.batch_buffer,
         outlier_window_size=args.outlier_window_size,
-        outlier_sensitivity=args.outlier_sensitivity
+        outlier_sensitivity=args.outlier_sensitivity,
+        width=args.width
     )
 
     success = processor.run()
@@ -296,6 +299,10 @@ def run_interactive_mode():
         choices=["jpg", "png"],
         default="jpg"
     )
+    
+    # Add option for resizing
+    width = get_valid_int("Enter width to resize images (0 for no resizing, height will be adjusted proportionally)", min_value=0, default=0)
+    
     force_overwrite = get_yes_no("Force overwrite existing files in output directory without confirmation?", default=False)
 
     # Print summary
@@ -317,6 +324,10 @@ def run_interactive_mode():
         print(f"Sensitivity: {outlier_sensitivity}")
 
     print(f"Output format: {output_format}")
+    if width > 0:
+        print(f"Resize width: {width} (proportional height)")
+    else:
+        print("No resizing will be applied")
     print(f"Force overwrite: {'Yes' if force_overwrite else 'No'}")
 
     # Confirm before proceeding
@@ -339,7 +350,8 @@ def run_interactive_mode():
         batch_size=batch_size,
         batch_buffer=batch_buffer,
         outlier_window_size=outlier_window_size,
-        outlier_sensitivity=outlier_sensitivity
+        outlier_sensitivity=outlier_sensitivity,
+        width=width
     )
 
     success = processor.run()
