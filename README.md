@@ -47,6 +47,7 @@ sharp-frames <input_path> <output_directory> [options]  # With arguments
 
 -   `--fps <int>`: Frames per second to extract (video input only, default: 10).
 -   `--format <jpg|png>`: Output image format for saved files (default: `jpg`).
+-   `--width <int>`: Width to resize output images (height will be adjusted proportionally, 0 for no resizing, default: 0).
 -   `--force-overwrite`: Overwrite existing files in the output directory without confirmation.
 -   `--interactive`: Run in interactive mode, prompting for all options.
 
@@ -95,6 +96,13 @@ sharp-frames my_video.mp4 ./selected_batched --selection-method batched --batch-
 ```
 (Selects the best frame from batches of 10, skipping 2 frames between batches)
 
+### Video usage with resizing 
+
+```bash
+sharp-frames my_video.mp4 ./resized_frames --width 800
+```
+(Extracts frames at 10fps, resizes to 800px width while maintaining aspect ratio, selects 300 best frames)
+
 ### Directory usage (outlier removal)
 
 ```bash
@@ -113,12 +121,13 @@ sharp-frames --interactive
 
 1.  **Flexible Input**: Process video files or directories of images.
 2.  **Multiple Selection Methods**: Choose between `best-n`, `batched`, or `outlier-removal` algorithms.
-3.  **Interactive Mode**: Easy-to-use prompts for configuration without CLI arguments.
-4.  **Progress Visualization**: Real-time progress bars for dependencies, extraction (video), sharpness calculation, selection, and saving.
-5.  **Parallel Processing**: Utilizes multiple CPU cores for faster sharpness calculation.
-6.  **Memory Efficiency**: Handles large numbers of frames/images effectively.
-7.  **Interruptible**: Can be safely cancelled using `Ctrl+C`.
-8.  **Cross-Platform**: Designed to work on Windows, macOS, and Linux (with dependencies installed).
+3.  **Image Resizing**: Resize output images to a custom width while maintaining aspect ratio.
+4.  **Interactive Mode**: Easy-to-use prompts for configuration without CLI arguments.
+5.  **Progress Visualization**: Real-time progress bars for dependencies, extraction (video), sharpness calculation, selection, and saving.
+6.  **Parallel Processing**: Utilizes multiple CPU cores for faster sharpness calculation.
+7.  **Memory Efficiency**: Handles large numbers of frames/images effectively.
+8.  **Interruptible**: Can be safely cancelled using `Ctrl+C`.
+9.  **Cross-Platform**: Designed to work on Windows, macOS, and Linux (with dependencies installed).
 
 ## How it works
 

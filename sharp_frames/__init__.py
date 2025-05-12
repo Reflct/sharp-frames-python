@@ -1,6 +1,6 @@
 """Sharp Frames - Extract, score, and select the best frames from a video or image directory."""
 
-__version__ = "0.1.2"
+__version__ = "0.1.3"
 
 import subprocess
 import sys
