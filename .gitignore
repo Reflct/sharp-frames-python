@@ -36,3 +36,5 @@ htmlcov/
 *.swp
 *.swo
 
+#history
+/.history
