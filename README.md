@@ -34,7 +34,8 @@ pipx install sharp-frames
 ## Usage
 
 ```bash
-sharp-frames --interactive  # Interactive mode
+sharp-frames --interactive  # Interactive mode (terminal prompts)
+sharp-frames --textual      # Interactive mode (modern UI)
 sharp-frames <input_path> <output_directory> [options]  # With arguments
 ```
 
@@ -50,6 +51,7 @@ sharp-frames <input_path> <output_directory> [options]  # With arguments
 -   `--width <int>`: Width to resize output images (height will be adjusted proportionally, 0 for no resizing, default: 0).
 -   `--force-overwrite`: Overwrite existing files in the output directory without confirmation.
 -   `--interactive`: Run in interactive mode, prompting for all options.
+-   `--textual`: Run with a modern text-based user interface (requires `textual` package).
 
 **Selection Method Options:**
 
