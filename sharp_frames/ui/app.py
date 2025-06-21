@@ -52,7 +52,7 @@ class SharpFramesApp(App):
             # If this is likely a spurious escape (part of ANSI sequence)
             if current_time - self._last_escape_time < 0.1:  # Less than 100ms
                 self.log.info("Filtering out spurious escape sequence")
-                event.prevent_default()
+                event.stop()  # Stop event propagation completely
                 return
             
             self._last_escape_time = current_time
@@ -61,15 +61,21 @@ class SharpFramesApp(App):
             # Only allow escape if it seems like a genuine user action
             if self._escape_count > 3:  # Too many escapes, likely spurious
                 self.log.info("Too many escape sequences detected, filtering")
-                event.prevent_default()
+                event.stop()  # Stop event propagation completely
                 return
+            
+            # For now, block ALL escape keys to prevent spurious exits
+            # This is aggressive but necessary for macOS stability
+            self.log.info("Blocking escape key to prevent spurious app exit")
+            event.stop()  # Stop event propagation completely
+            return
         
         # Filter out ANSI escape sequences that corrupt input
         if hasattr(event, 'character') and event.character:
             # Check for ANSI escape sequence patterns
             if re.match(r'[\x1b\x9b][\[\(].*[A-Za-z~]', event.character):
                 self.log.info(f"Filtering ANSI escape sequence: {repr(event.character)}")
-                event.prevent_default()
+                event.stop()  # Stop event propagation completely
                 return
     
     def on_mount(self) -> None:
