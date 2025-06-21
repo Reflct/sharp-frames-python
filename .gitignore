@@ -38,3 +38,6 @@ htmlcov/
 
 #history
 /.history
+
+#logs
+*.log

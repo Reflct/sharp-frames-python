@@ -1,5 +1,5 @@
 """
-MinimalProgressSharpFrames - Enhanced SharpFrames with progress callbacks.
+MinimalProgressSharpFrames - UI-safe SharpFrames that avoids tqdm multiprocessing issues.
 """
 
 import os
@@ -22,34 +22,62 @@ from ..ui.utils import managed_subprocess, managed_temp_directory, managed_threa
 
 
 class MinimalProgressSharpFrames(SharpFrames):
-    """Minimal SharpFrames extension that only intercepts progress without breaking functionality."""
+    """UI-safe SharpFrames extension that avoids tqdm multiprocessing issues in Textual UI context."""
     
     def __init__(self, progress_callback=None, app_instance=None, **kwargs):
         self.progress_callback = progress_callback
-        self.app_instance = app_instance  # Store app instance for signal handling
-        # Remove progress_callback and app_instance from kwargs before passing to parent
+        self.app_instance = app_instance
+        # Remove UI-specific kwargs before passing to parent
         clean_kwargs = {k: v for k, v in kwargs.items() if k not in ['progress_callback', 'app_instance']}
         super().__init__(**clean_kwargs)
     
     def _update_progress(self, phase: str, current: int, total: int, description: str = ""):
-        """Update progress if callback is available."""
+        """Update progress via callback if available."""
         if self.progress_callback:
             self.progress_callback(phase, current, total, description)
     
     def _check_output_dir_overwrite(self):
         """Override to handle output directory checking in UI context without interactive prompts."""
         if not os.path.isdir(self.output_dir):
-            # If it doesn't exist, it will be created, no overwrite check needed
             return
 
         existing_files = os.listdir(self.output_dir)
+        
         if existing_files and not self.force_overwrite:
-            # In UI context, we don't prompt - we proceed but warn
             print(f"Warning: Output directory '{self.output_dir}' already contains {len(existing_files)} files.")
             print("Files may be overwritten. Use force overwrite option in configuration to suppress this warning.")
-            # Continue without prompting since we're in a UI context
         elif existing_files and self.force_overwrite:
             print(f"Output directory '{self.output_dir}' contains {len(existing_files)} files. Overwriting without confirmation (force overwrite enabled).")
+    
+    def _check_dependencies(self, check_ffmpeg: bool = True) -> bool:
+        """Override dependency check to ensure proper OpenCV detection."""
+        try:
+            if check_ffmpeg:
+                # Check for FFmpeg
+                try:
+                    subprocess.run(["ffmpeg", "-version"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, text=True)
+                except (subprocess.SubprocessError, FileNotFoundError):
+                    print("Error: FFmpeg is not installed or not in PATH. Required for video input.")
+                    return False
+
+                # Check for FFprobe (warning only if missing)
+                try:
+                    subprocess.run(["ffprobe", "-version"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, text=True)
+                except (subprocess.SubprocessError, FileNotFoundError):
+                    print("Warning: FFprobe is not installed or not in PATH. Video duration cannot be determined.")
+
+            # Always check for OpenCV (needed for sharpness calculation)
+            try:
+                import cv2
+            except ImportError:
+                print("Error: OpenCV (cv2) is not installed. Please install it (e.g., pip install opencv-python).")
+                return False
+
+        except Exception as e:
+            print(f"Error checking dependencies: {str(e)}")
+            return False
+            
+        return True
     
     def _build_ffmpeg_command(self, output_pattern: str) -> List[str]:
         """Build the FFmpeg command for frame extraction."""
@@ -303,8 +331,11 @@ class MinimalProgressSharpFrames(SharpFrames):
         return frames_data
     
     def _analyze_and_select_frames(self, frame_paths: List[str]) -> List[Dict[str, Any]]:
-        """Override to add progress tracking to frame selection."""
+        """Override to add progress tracking and avoid tqdm multiprocessing issues."""
         print("Calculating sharpness scores...")
+        self._update_progress("sharpness", 0, len(frame_paths), "Starting sharpness calculation")
+        
+        # Use parent's sharpness calculation
         frames_with_scores = self._calculate_sharpness(frame_paths)
 
         if not frames_with_scores:
@@ -314,47 +345,47 @@ class MinimalProgressSharpFrames(SharpFrames):
         print(f"Selecting frames/images using {self.selection_method} method...")
         self._update_progress("selection", 0, len(frames_with_scores), f"Starting {self.selection_method} selection")
         
-        # Call parent method for the actual selection logic
-        # Import here to avoid circular imports
-        from ..selection_methods import (
-            select_best_n_frames,
-            select_batched_frames,
-            select_outlier_removal_frames
-        )
-        
+        # Call selection methods but avoid tqdm multiprocessing issues
         selected_frames_data = []
-        if self.selection_method == "best-n":
-            selected_frames_data = select_best_n_frames(
-                frames_with_scores,
-                self.num_frames,
-                self.min_buffer,
-                self.BEST_N_SHARPNESS_WEIGHT,
-                self.BEST_N_DISTRIBUTION_WEIGHT
-            )
-        elif self.selection_method == "batched":
-            selected_frames_data = select_batched_frames(
-                frames_with_scores,
-                self.batch_size,
-                self.batch_buffer
-            )
-        elif self.selection_method == "outlier-removal":
-            all_frames_data = select_outlier_removal_frames(
-                frames_with_scores,
-                self.outlier_window_size,
-                self.outlier_sensitivity,
-                self.OUTLIER_MIN_NEIGHBORS,
-                self.OUTLIER_THRESHOLD_DIVISOR
-            )
-            selected_frames_data = [frame for frame in all_frames_data if frame.get("selected", True)]
-        else:
-            print(f"Warning: Unknown selection method '{self.selection_method}'. Using best-n instead.")
-            selected_frames_data = select_best_n_frames(
-                frames_with_scores,
-                self.num_frames,
-                self.min_buffer,
-                self.BEST_N_SHARPNESS_WEIGHT,
-                self.BEST_N_DISTRIBUTION_WEIGHT
-            )
+        try:
+            if self.selection_method == "best-n":
+                # Use UI-safe implementation to avoid tqdm multiprocessing issues
+                selected_frames_data = self._select_best_n_frames_ui_safe(
+                    frames_with_scores,
+                    self.num_frames,
+                    self.min_buffer,
+                    self.BEST_N_SHARPNESS_WEIGHT,
+                    self.BEST_N_DISTRIBUTION_WEIGHT
+                )
+            elif self.selection_method == "batched":
+                from ..selection_methods import select_batched_frames
+                selected_frames_data = select_batched_frames(
+                    frames_with_scores,
+                    self.batch_size,
+                    self.batch_buffer
+                )
+            elif self.selection_method == "outlier-removal":
+                from ..selection_methods import select_outlier_removal_frames
+                all_frames_data = select_outlier_removal_frames(
+                    frames_with_scores,
+                    self.outlier_window_size,
+                    self.outlier_sensitivity,
+                    self.OUTLIER_MIN_NEIGHBORS,
+                    self.OUTLIER_THRESHOLD_DIVISOR
+                )
+                selected_frames_data = [frame for frame in all_frames_data if frame.get("selected", True)]
+            else:
+                print(f"Warning: Unknown selection method '{self.selection_method}'. Using best-n instead.")
+                selected_frames_data = self._select_best_n_frames_ui_safe(
+                    frames_with_scores,
+                    self.num_frames,
+                    self.min_buffer,
+                    self.BEST_N_SHARPNESS_WEIGHT,
+                    self.BEST_N_DISTRIBUTION_WEIGHT
+                )
+        except Exception as e:
+            print(f"Error during frame selection: {e}")
+            return []
 
         self._update_progress("selection", len(selected_frames_data), len(selected_frames_data), 
                             f"Selected {len(selected_frames_data)} frames")
@@ -364,72 +395,111 @@ class MinimalProgressSharpFrames(SharpFrames):
 
         return selected_frames_data
     
-    def _save_frames(self, selected_frames: List[Dict[str, Any]], progress_bar=None) -> None:
-        """Override to add progress tracking to frame saving."""
-        self._update_progress("saving", 0, len(selected_frames), "Starting to save frames")
+    def _select_best_n_frames_ui_safe(self, frames: List[Dict[str, Any]], num_frames: int, min_buffer: int,
+                                      sharpness_weight: float, distribution_weight: float) -> List[Dict[str, Any]]:
+        """UI-safe version of select_best_n_frames that avoids tqdm multiprocessing issues."""
+        from ..selection_methods import _select_initial_segments, _fill_remaining_slots
         
-        # Call parent method - but we need to implement it since parent expects a progress_bar parameter
-        os.makedirs(self.output_dir, exist_ok=True)
-        metadata_list = []
+        if not frames:
+            return []
 
-        for idx, frame_data in enumerate(selected_frames):
-            src_path = frame_data["path"]
-            original_id = frame_data["id"]
-            original_index = frame_data["index"]
-            sharpness_score = frame_data.get("sharpnessScore", 0)
+        n = min(num_frames, len(frames))
+        min_gap = min_buffer
 
-            filename = self.OUTPUT_FILENAME_FORMAT.format(
-                seq=idx + 1,
-                ext=self.output_format
-            )
-            dst_path = os.path.join(self.output_dir, filename)
-
-            try:
-                if self.width > 0 and self.input_type == "directory":
-                    img = cv2.imread(src_path)
-                    if img is None:
-                        raise Exception(f"Failed to read image for resizing: {src_path}")
-                    
-                    height = int(img.shape[0] * (self.width / img.shape[1]))
-                    if height % 2 != 0:
-                        height += 1
-                    
-                    resized_img = cv2.resize(img, (self.width, height), interpolation=cv2.INTER_AREA)
-                    cv2.imwrite(dst_path, resized_img)
-                else:
-                    shutil.copy2(src_path, dst_path)
-            except Exception as e:
-                print(f"Error saving {src_path} to {dst_path}: {e}")
-                continue
-
-            metadata_list.append({
-                "output_filename": filename,
-                "original_id": original_id,
-                "original_index": original_index,
-                "sharpness_score": sharpness_score
-            })
-
-            # Update progress for each saved file
-            self._update_progress("saving", idx + 1, len(selected_frames), 
-                                f"Saved {idx + 1}/{len(selected_frames)} frames")
-
-        # Save metadata
-        metadata_path = os.path.join(self.output_dir, "selected_metadata.json")
-        try:
-            metadata = {
-                "input_path": self.input_path,
-                "input_type": self.input_type,
-                "total_processed": len(selected_frames),
-                "selection_method": self.selection_method,
-                "method_parameters": self._get_method_params_for_metadata(),
-                "output_format": self.output_format,
-                "resize_width": self.width if self.width > 0 else None,
-                "selected_items": metadata_list
-            }
+        # Create a simple progress tracker that updates our UI progress
+        class UIProgressTracker:
+            def __init__(self, total, parent):
+                self.total = total
+                self.current = 0
+                self.parent = parent
             
-            with open(metadata_path, 'w') as f:
-                json.dump(metadata, f, indent=2)
-                
-            print(f"Metadata saved to: {metadata_path}")
+            def update(self, increment=1):
+                self.current += increment
+                self.parent._update_progress("selection", self.current, self.total, 
+                                           f"Selected {self.current}/{self.total} frames")
+
+        progress_tracker = UIProgressTracker(n, self)
+
+        # Use the original selection logic but with our UI-safe progress tracker
+        selected_frames, selected_indices = _select_initial_segments(
+            frames, n, min_gap, progress_tracker
+        )
+
+        if len(selected_frames) < n:
+            _fill_remaining_slots(
+                frames, n, min_gap, selected_frames, selected_indices, progress_tracker,
+                sharpness_weight, distribution_weight
+            )
+
+        return sorted(selected_frames, key=lambda f: f["index"])
+    
+    def _save_frames(self, selected_frames: List[Dict[str, Any]], progress_bar=None) -> None:
+        """Override to add progress tracking and avoid tqdm."""
+        if not selected_frames:
+            return
+
+        total_frames = len(selected_frames)
+        self._update_progress("saving", 0, total_frames, "Starting to save frames")
+        
+        # Call parent method but pass None to avoid tqdm
+        super()._save_frames(selected_frames, None)
+        
+        # Final progress update
+        self._update_progress("saving", total_frames, total_frames, f"Saved {total_frames} frames")
+
+    def run(self):
+        """Override the parent run() method to avoid tqdm usage in UI context."""
+        cleanup_temp_dir = False
+
+        try:
+            # Setup Phase
+            self._update_progress("setup", 0, 1, "Setting up processing")
+            if not self._setup():
+                print("Setup failed. Exiting.")
+                return False
+            self._update_progress("setup", 1, 1, "Setup complete")
+
+            # Load Input Frames Phase
+            self._update_progress("loading", 0, 1, "Loading input frames")
+            frame_paths, cleanup_temp_dir = self._load_input_frames()
+            if not frame_paths and self.input_type == "directory":
+                print("No images found or loaded. Exiting gracefully.")
+                return True
+            elif not frame_paths and self.input_type in ["video", "video_directory"]:
+                print("No frames extracted from video(s). Exiting.")
+                return False
+            self._update_progress("loading", 1, 1, f"Loaded {len(frame_paths)} frames")
+
+            # Analyze and Select Phase
+            self._update_progress("analysis", 0, 1, "Starting analysis and selection")
+            selected_frames_data = self._analyze_and_select_frames(frame_paths)
+            if not selected_frames_data:
+                print("Frame analysis or selection yielded no results. Exiting.")
+                return True
+            self._update_progress("analysis", 1, 1, f"Selected {len(selected_frames_data)} frames")
+
+            # Save Phase - Use our UI-safe save method instead of tqdm
+            print(f"Saving {len(selected_frames_data)} selected frames/images...")
+            self._save_frames(selected_frames_data, None)
+
+            print(f"Successfully processed. Selected items saved to: {self.output_dir}")
+            self._update_progress("complete", 1, 1, "Processing complete")
+            return True
+
+        except KeyboardInterrupt:
+            print("Process cancelled by user. Cleaning up...")
+            return False
         except Exception as e:
-            print(f"Warning: Could not save metadata: {str(e)}") 
+            print(f"Error during processing: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return False
+        finally:
+            # Clean up temporary directory only if it was created (video input)
+            if cleanup_temp_dir and self.temp_dir and os.path.exists(self.temp_dir):
+                print("Cleaning up temporary directory...")
+                try:
+                    shutil.rmtree(self.temp_dir)
+                    print(f"Cleaned up temporary directory: {self.temp_dir}")
+                except Exception as e:
+                    print(f"Warning: Could not clean up temporary directory: {str(e)}") 
