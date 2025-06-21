@@ -174,12 +174,27 @@ def main():
                        help="Sensitivity of outlier detection, 0-100 (default: 50)")
     parser.add_argument("--width", type=int, default=0,
                        help="Width to resize output images (height will be adjusted proportionally, 0 for no resizing)")
-    parser.add_argument("--interactive", action="store_true", help="Run in interactive mode, prompting for options")
-    parser.add_argument("--textual", action="store_true", help="Run with Textual UI (requires textual package)")
+    parser.add_argument("--interactive", action="store_true", help="Run in legacy interactive mode (terminal prompts)")
+    parser.add_argument("--textual", action="store_true", help="Run with Textual UI (modern interface - default when no paths provided)")
 
     args = parser.parse_args()
 
-    # Check for textual interface first
+    # If no paths provided, determine which interactive mode to use
+    if args.input_path is None and args.output_dir is None:
+        if args.interactive:
+            # User explicitly requested legacy interactive mode
+            return run_interactive_mode()
+        else:
+            # Default to textual interface (modern UI)
+            try:
+                from .textual_interface import run_textual_interface
+                return 0 if run_textual_interface() else 1
+            except ImportError:
+                print("Warning: Textual package not available. Falling back to interactive mode.")
+                print("For the modern UI, install with: pip install textual")
+                return run_interactive_mode()
+    
+    # Check for explicit textual interface request (even with paths provided)
     if args.textual:
         try:
             from .textual_interface import run_textual_interface
@@ -188,10 +203,6 @@ def main():
             print("Error: Textual package is required for --textual mode.")
             print("Install it with: pip install textual")
             return 1
-
-    # If no paths provided or interactive flag, run interactive mode
-    if args.interactive or (args.input_path is None and args.output_dir is None):
-        return run_interactive_mode()
 
     # Validate input path and determine type
     if not os.path.exists(args.input_path):
