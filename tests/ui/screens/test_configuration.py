@@ -136,8 +136,8 @@ class TestConfigurationValidation:
             'output_dir': '/output',
             'selection_method': 'batched',
             'param1': 10,
-            'output_format': 'png',
-            'width': 1024,
+            'output_format': 'png',  # This will be ignored for directory input
+            'width': 1024,  # This will be ignored for directory input
             'force_overwrite': False
         }
         
@@ -146,8 +146,9 @@ class TestConfigurationValidation:
         # Check that key information is present
         assert 'images' in summary
         assert 'batched' in summary
-        assert 'PNG' in summary  # Output format is uppercase
-        assert '1024px' in summary  # Width includes 'px'
+        # For directory input, format and dimensions should be preserved
+        assert 'Preserve original formats' in summary
+        assert 'Preserve original dimensions' in summary
         # FPS should not be mentioned for directory input
         assert 'FPS:' not in summary  # Actual format check
     
@@ -212,8 +213,8 @@ class TestConfigurationValidation:
             'output_dir': '/output',
             'selection_method': 'batched',
             'param1': 10,  # batch_size
-            'output_format': 'png',
-            'width': 1024,
+            'output_format': 'png',  # Will be overridden to 'preserve' for directory
+            'width': 1024,  # Will be overridden to 0 for directory
             'force_overwrite': False
         }
         
@@ -223,6 +224,9 @@ class TestConfigurationValidation:
         assert 'batch_size' in final_config  # Will have default value, not necessarily 10
         # fps should be 0 for directory input (not absent)
         assert final_config['fps'] == 0
+        # For directory input, format should be placeholder 'jpg' (not used anyway) and width should be 0
+        assert final_config['output_format'] == 'jpg'
+        assert final_config['width'] == 0
     
     def test_prepare_final_config_video_directory_method(self, mock_form):
         """Test final config for video directory input."""

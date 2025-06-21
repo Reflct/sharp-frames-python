@@ -35,6 +35,21 @@ class MinimalProgressSharpFrames(SharpFrames):
         if self.progress_callback:
             self.progress_callback(phase, current, total, description)
     
+    def _check_output_dir_overwrite(self):
+        """Override to handle output directory checking in UI context without interactive prompts."""
+        if not os.path.isdir(self.output_dir):
+            # If it doesn't exist, it will be created, no overwrite check needed
+            return
+
+        existing_files = os.listdir(self.output_dir)
+        if existing_files and not self.force_overwrite:
+            # In UI context, we don't prompt - we proceed but warn
+            print(f"Warning: Output directory '{self.output_dir}' already contains {len(existing_files)} files.")
+            print("Files may be overwritten. Use force overwrite option in configuration to suppress this warning.")
+            # Continue without prompting since we're in a UI context
+        elif existing_files and self.force_overwrite:
+            print(f"Output directory '{self.output_dir}' contains {len(existing_files)} files. Overwriting without confirmation (force overwrite enabled).")
+    
     def _build_ffmpeg_command(self, output_pattern: str) -> List[str]:
         """Build the FFmpeg command for frame extraction."""
         # Build the video filters string

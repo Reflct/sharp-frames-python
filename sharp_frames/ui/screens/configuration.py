@@ -24,7 +24,6 @@ class ConfigurationForm(Screen):
     BINDINGS = [
         Binding("escape", "cancel", "Cancel"),
         Binding("ctrl+c", "cancel", "Cancel"),
-        Binding("enter", "next_step", "Next"),
     ]
     
     def __init__(self):
@@ -127,6 +126,10 @@ class ConfigurationForm(Screen):
             return self.config_data.get("input_type") in [InputTypes.VIDEO, InputTypes.VIDEO_DIRECTORY]
         if step == "method_params":
             return self.config_data.get("selection_method") in ["best-n", "batched", "outlier-removal"]
+        if step == "output_format":
+            return self.config_data.get("input_type") != InputTypes.DIRECTORY
+        if step == "width":
+            return self.config_data.get("input_type") != InputTypes.DIRECTORY
         return True
     
     def _show_error(self, container, message: str, error_id: str = "error-message") -> None:
@@ -357,13 +360,19 @@ class ConfigurationForm(Screen):
             lines.append(f"  Window size: {self.config_data.get('outlier_window_size', 15)}")
             lines.append(f"  Sensitivity: {self.config_data.get('outlier_sensitivity', 50)}")
         
-        lines.append(f"Output Format: {self.config_data.get('output_format', 'jpg').upper()}")
-        
-        width = self.config_data.get('width', 0)
-        if width > 0:
-            lines.append(f"Resize Width: {width}px")
+        # Only show output format and resize options for non-directory modes
+        input_type = self.config_data.get("input_type", InputTypes.VIDEO)
+        if input_type != InputTypes.DIRECTORY:
+            lines.append(f"Output Format: {self.config_data.get('output_format', 'jpg').upper()}")
+            
+            width = self.config_data.get('width', 0)
+            if width > 0:
+                lines.append(f"Resize Width: {width}px")
+            else:
+                lines.append("Resize Width: No resizing")
         else:
-            lines.append("Resize Width: No resizing")
+            lines.append("Output Format: Preserve original formats")
+            lines.append("Resize Width: Preserve original dimensions")
         
         overwrite = self.config_data.get('force_overwrite', False)
         lines.append(f"Force Overwrite: {'Yes' if overwrite else 'No'}")
@@ -571,29 +580,11 @@ class ConfigurationForm(Screen):
         """Cancel the configuration."""
         self.app.exit(result="cancelled")
     
-    def action_next_step(self) -> None:
-        """Action for Enter key - same as clicking Next button."""
-        self._next_step()
+
     
-    def on_key(self, event) -> None:
-        """Handle key events for the entire screen."""
-        if event.key == "enter":
-            # Check if we're focused on a radio button
-            focused = self.app.focused
-            if focused:
-                from textual.widgets import RadioButton
-                if isinstance(focused, RadioButton):
-                    # First, let the radio button toggle by simulating a space press
-                    # which is the standard way to select radio buttons
-                    focused.action_toggle()
-                    # Then proceed to next step after a refresh
-                    self.call_after_refresh(self._next_step)
-                    event.stop()
-                    return
-            
-            # For non-radio button elements, proceed normally
-            self._next_step()
-            event.stop()
+
+    
+
     
     def action_process(self) -> None:
         """Process the configuration and start Sharp Frames."""
@@ -608,14 +599,25 @@ class ConfigurationForm(Screen):
     
     def _prepare_final_config(self) -> Dict[str, Any]:
         """Prepare the final configuration for processing."""
+        input_type = self.config_data.get("input_type", InputTypes.VIDEO)
+        
         config = {
             "input_path": self.config_data.get("input_path"),
-            "input_type": self.config_data.get("input_type", InputTypes.VIDEO),
+            "input_type": input_type,
             "output_dir": self.config_data.get("output_dir"),
-            "output_format": self.config_data.get("output_format", "jpg"),
-            "width": self.config_data.get("width", 0),
             "force_overwrite": self.config_data.get("force_overwrite", False),
         }
+        
+        # Set output format and width based on input type
+        if input_type == InputTypes.DIRECTORY:
+            # For image directory mode, preserve original formats and dimensions
+            # Use jpg as placeholder (not used for directory input since we preserve originals)
+            config["output_format"] = "jpg"
+            config["width"] = 0
+        else:
+            # For video modes, use user-selected format and width
+            config["output_format"] = self.config_data.get("output_format", "jpg")
+            config["width"] = self.config_data.get("width", 0)
         
         # Add video-specific config
         if config["input_type"] in [InputTypes.VIDEO, InputTypes.VIDEO_DIRECTORY]:
