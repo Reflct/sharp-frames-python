@@ -28,6 +28,7 @@ class SharpFramesApp(App):
         # Track spurious escape sequences
         self._last_escape_time = 0
         self._escape_count = 0
+        self._last_action_time = 0
         super().__init__(**kwargs)
     
     def setup_signal_handlers(self):
@@ -40,6 +41,30 @@ class SharpFramesApp(App):
         signal.signal(signal.SIGTERM, signal_handler)
         signal.signal(signal.SIGHUP, signal_handler)
         signal.signal(signal.SIGPIPE, signal_handler)
+    
+    def action_cancel(self) -> None:
+        """Override cancel action to prevent spurious exits from ANSI sequences."""
+        current_time = time.time()
+        
+        # If we just had escape sequences recently, this is likely spurious
+        if current_time - self._last_escape_time < 2.0:  # Within 2 seconds of escape detection
+            self.log.info(f"Blocking cancel action - likely triggered by spurious escape sequence (time since escape: {current_time - self._last_escape_time:.2f}s)")
+            return
+        
+        # If we've had multiple recent actions, likely spurious
+        if current_time - self._last_action_time < 0.5:  # Multiple actions within 500ms
+            self.log.info("Blocking cancel action - too many rapid actions detected")
+            return
+        
+        self._last_action_time = current_time
+        
+        # For now, block ALL cancel actions to prevent spurious exits
+        # This is aggressive but necessary for macOS stability
+        self.log.info("Blocking cancel action to prevent spurious app exit")
+        return
+        
+        # Original cancel behavior would be:
+        # super().action_cancel()
     
     def on_key(self, event: Key) -> None:
         """Solution 4: Handle and filter problematic key events."""
