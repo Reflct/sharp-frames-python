@@ -47,7 +47,14 @@ class ConfigurationForm(Screen):
     def compose(self) -> ComposeResult:
         """Create the wizard layout."""
         yield Header()
-        yield Static("Sharp Frames - Configuration Wizard", classes="title")
+        ascii_title = """
+ ███████ ██   ██  █████  ██████  ██████     ███████ ██████   █████  ███    ███ ███████ ███████ 
+ ██      ██   ██ ██   ██ ██   ██ ██   ██    ██      ██   ██ ██   ██ ████  ████ ██      ██      
+ ███████ ███████ ███████ ██████  ██████     █████   ██████  ███████ ██ ████ ██ █████   ███████ 
+      ██ ██   ██ ██   ██ ██   ██ ██         ██      ██   ██ ██   ██ ██  ██  ██ ██           ██ 
+ ███████ ██   ██ ██   ██ ██   ██ ██         ██      ██   ██ ██   ██ ██      ██ ███████ ███████ 
+        """
+        yield Static(ascii_title, classes="title")
         yield Static("", id="step-info", classes="step-info")
         
         with Container(id="main-container"):
@@ -117,10 +124,31 @@ class ConfigurationForm(Screen):
     def _should_show_step(self, step: str) -> bool:
         """Check if a step should be shown based on current configuration."""
         if step == "fps":
-            return self.config_data.get("input_type") == "video"
+            return self.config_data.get("input_type") in [InputTypes.VIDEO, InputTypes.VIDEO_DIRECTORY]
         if step == "method_params":
             return self.config_data.get("selection_method") in ["best-n", "batched", "outlier-removal"]
         return True
+    
+    def _show_error(self, container, message: str, error_id: str = "error-message") -> None:
+        """Show an error message in the container."""
+        # Remove existing error if present
+        try:
+            existing_error = container.query_one(f"#{error_id}")
+            existing_error.remove()
+        except:
+            pass
+        
+        # Add new error message
+        error_label = Label(message, classes="error-message", id=error_id)
+        container.mount(error_label)
+    
+    def _clear_error(self, container, error_id: str = "error-message") -> None:
+        """Clear error message from the container."""
+        try:
+            error = container.query_one(f"#{error_id}")
+            error.remove()
+        except:
+            pass
     
     def _create_input_type_step(self, container) -> None:
         """Create the input type selection step."""
@@ -129,18 +157,21 @@ class ConfigurationForm(Screen):
         # Create radio buttons and mount them
         radio_set = RadioSet(id=UIElementIds.INPUT_TYPE_RADIO)
         video_radio = RadioButton("Video file", value=True, id=UIElementIds.VIDEO_OPTION)
+        video_dir_radio = RadioButton("Video directory", id=UIElementIds.VIDEO_DIRECTORY_OPTION)
         dir_radio = RadioButton("Image directory", id=UIElementIds.DIRECTORY_OPTION)
         
         # Mount radio set first, then add children
         container.mount(radio_set)
         radio_set.mount(video_radio)
+        radio_set.mount(video_dir_radio)
         radio_set.mount(dir_radio)
         
         # Set current value if exists
         if "input_type" in self.config_data:
-            if self.config_data["input_type"] == InputTypes.DIRECTORY:
-                dir_radio.value = True
-                video_radio.value = False
+            current_type = self.config_data["input_type"]
+            video_radio.value = current_type == InputTypes.VIDEO
+            video_dir_radio.value = current_type == InputTypes.VIDEO_DIRECTORY
+            dir_radio.value = current_type == InputTypes.DIRECTORY
     
     def _create_input_path_step(self, container) -> None:
         """Create the input path step."""
@@ -148,6 +179,9 @@ class ConfigurationForm(Screen):
         if input_type == InputTypes.VIDEO:
             container.mount(Label("Enter the path to your video file:", classes="question"))
             placeholder = "e.g., /path/to/video.mp4"
+        elif input_type == InputTypes.VIDEO_DIRECTORY:
+            container.mount(Label("Enter the path to your video directory:", classes="question"))
+            placeholder = "e.g., /path/to/videos/"
         else:
             container.mount(Label("Enter the path to your image directory:", classes="question"))
             placeholder = "e.g., /path/to/images/"
@@ -173,7 +207,13 @@ class ConfigurationForm(Screen):
     
     def _create_fps_step(self, container) -> None:
         """Create the FPS selection step."""
-        container.mount(Label("How many frames per second should be extracted from the video?", classes="question"))
+        input_type = self.config_data.get("input_type", InputTypes.VIDEO)
+        if input_type == InputTypes.VIDEO_DIRECTORY:
+            question_text = "How many frames per second should be extracted from each video?"
+        else:
+            question_text = "How many frames per second should be extracted from the video?"
+            
+        container.mount(Label(question_text, classes="question"))
         input_widget = Input(
             value=str(self.config_data.get("fps", 10)),
             validators=[IntRangeValidator(min_value=1, max_value=60)],
@@ -295,13 +335,14 @@ class ConfigurationForm(Screen):
         """Build a summary of the current configuration."""
         lines = []
         
-        input_type = self.config_data.get("input_type", "video")
+        input_type = self.config_data.get("input_type", InputTypes.VIDEO)
         lines.append(f"Input Type: {input_type.title()}")
         lines.append(f"Input Path: {self.config_data.get('input_path', 'Not set')}")
         lines.append(f"Output Directory: {self.config_data.get('output_dir', 'Not set')}")
         
-        if input_type == "video":
-            lines.append(f"FPS: {self.config_data.get('fps', 10)}")
+        if input_type in [InputTypes.VIDEO, InputTypes.VIDEO_DIRECTORY]:
+            fps_label = "FPS (per video)" if input_type == InputTypes.VIDEO_DIRECTORY else "FPS"
+            lines.append(f"{fps_label}: {self.config_data.get('fps', 10)}")
         
         method = self.config_data.get("selection_method", "best-n")
         lines.append(f"Selection Method: {method}")
@@ -338,6 +379,8 @@ class ConfigurationForm(Screen):
         elif event.button.id == "back-btn":
             self._back_step()
     
+
+    
     def _next_step(self) -> None:
         """Move to the next step in the wizard."""
         # Save current step data
@@ -368,33 +411,70 @@ class ConfigurationForm(Screen):
     def _save_current_step(self) -> bool:
         """Save the current step's data and validate it."""
         step = self.steps[self.current_step]
+        step_container = self.query_one("#step-container")
         
         try:
             if step == "input_type":
                 if self.query_one("#video-option").value:
-                    self.config_data["input_type"] = "video"
+                    self.config_data["input_type"] = InputTypes.VIDEO
+                elif self.query_one("#video-directory-option").value:
+                    self.config_data["input_type"] = InputTypes.VIDEO_DIRECTORY
                 else:
-                    self.config_data["input_type"] = "directory"
+                    self.config_data["input_type"] = InputTypes.DIRECTORY
                     
             elif step == "input_path":
                 input_widget = self.query_one(f"#{UIElementIds.INPUT_PATH_FIELD}", Input)
-                if not ValidationHelpers.validate_required_field(input_widget, "input path"):
+                value = input_widget.value.strip()
+                
+                # Clear any existing errors
+                self._clear_error(step_container)
+                
+                if not value:
+                    input_type = self.config_data.get("input_type", InputTypes.VIDEO)
+                    if input_type == InputTypes.VIDEO:
+                        self._show_error(step_container, "Please enter your video file path")
+                    elif input_type == InputTypes.VIDEO_DIRECTORY:
+                        self._show_error(step_container, "Please enter your video directory path")
+                    else:
+                        self._show_error(step_container, "Please enter your image directory path")
                     return False
-                if not ValidationHelpers.validate_path_exists(input_widget, "input path"):
-                    return False
-                self.config_data["input_path"] = input_widget.value.strip()
+                
+                # Validate path exists (but don't show error for non-existent paths in this simple validation)
+                self.config_data["input_path"] = value
                 
             elif step == "output_dir":
                 input_widget = self.query_one(f"#{UIElementIds.OUTPUT_DIR_FIELD}", Input)
-                if not ValidationHelpers.validate_required_field(input_widget, "output directory"):
+                value = input_widget.value.strip()
+                
+                # Clear any existing errors
+                self._clear_error(step_container)
+                
+                if not value:
+                    self._show_error(step_container, "Please enter your output directory path")
                     return False
-                self.config_data["output_dir"] = input_widget.value.strip()
+                
+                self.config_data["output_dir"] = value
                 
             elif step == "fps":
                 input_widget = self.query_one(f"#{UIElementIds.FPS_FIELD}", Input)
-                if not ValidationHelpers.validate_numeric_field(input_widget, "FPS"):
+                value = input_widget.value.strip()
+                
+                # Clear any existing errors
+                self._clear_error(step_container)
+                
+                if not value:
+                    self._show_error(step_container, "Please enter FPS value")
                     return False
-                self.config_data["fps"] = ValidationHelpers.get_int_value(input_widget, 10)
+                
+                try:
+                    fps_value = int(value)
+                    if fps_value < 1 or fps_value > 60:
+                        self._show_error(step_container, "FPS must be between 1 and 60")
+                        return False
+                    self.config_data["fps"] = fps_value
+                except ValueError:
+                    self._show_error(step_container, "FPS must be a valid number")
+                    return False
                 
             elif step == "selection_method":
                 select_widget = self.query_one("#selection-method-field", Select)
@@ -405,18 +485,53 @@ class ConfigurationForm(Screen):
                 param1 = self.query_one("#param1", Input)
                 param2 = self.query_one("#param2", Input)
                 
-                if not param1.is_valid or not param2.is_valid:
+                # Clear any existing errors
+                self._clear_error(step_container)
+                
+                value1 = param1.value.strip()
+                value2 = param2.value.strip()
+                
+                if not value1 or not value2:
+                    self._show_error(step_container, "Please fill in all parameter fields")
                     return False
                 
-                if method == "best-n":
-                    self.config_data["num_frames"] = int(param1.value)
-                    self.config_data["min_buffer"] = int(param2.value)
-                elif method == "batched":
-                    self.config_data["batch_size"] = int(param1.value)
-                    self.config_data["batch_buffer"] = int(param2.value)
-                elif method == "outlier-removal":
-                    self.config_data["outlier_window_size"] = int(param1.value)
-                    self.config_data["outlier_sensitivity"] = int(param2.value)
+                try:
+                    if method == "best-n":
+                        num_frames = int(value1)
+                        min_buffer = int(value2)
+                        if num_frames < 1:
+                            self._show_error(step_container, "Number of frames must be at least 1")
+                            return False
+                        if min_buffer < 0:
+                            self._show_error(step_container, "Minimum buffer must be 0 or greater")
+                            return False
+                        self.config_data["num_frames"] = num_frames
+                        self.config_data["min_buffer"] = min_buffer
+                    elif method == "batched":
+                        batch_size = int(value1)
+                        batch_buffer = int(value2)
+                        if batch_size < 1:
+                            self._show_error(step_container, "Batch size must be at least 1")
+                            return False
+                        if batch_buffer < 0:
+                            self._show_error(step_container, "Batch buffer must be 0 or greater")
+                            return False
+                        self.config_data["batch_size"] = batch_size
+                        self.config_data["batch_buffer"] = batch_buffer
+                    elif method == "outlier-removal":
+                        window_size = int(value1)
+                        sensitivity = int(value2)
+                        if window_size < 3:
+                            self._show_error(step_container, "Window size must be at least 3")
+                            return False
+                        if sensitivity < 0 or sensitivity > 100:
+                            self._show_error(step_container, "Sensitivity must be between 0 and 100")
+                            return False
+                        self.config_data["outlier_window_size"] = window_size
+                        self.config_data["outlier_sensitivity"] = sensitivity
+                except ValueError:
+                    self._show_error(step_container, "All parameters must be valid numbers")
+                    return False
                     
             elif step == "output_format":
                 select_widget = self.query_one("#output-format-field", Select)
@@ -424,9 +539,24 @@ class ConfigurationForm(Screen):
                 
             elif step == "width":
                 input_widget = self.query_one("#width-field", Input)
-                if not input_widget.is_valid:
+                value = input_widget.value.strip()
+                
+                # Clear any existing errors
+                self._clear_error(step_container)
+                
+                if not value:
+                    self._show_error(step_container, "Please enter width value (0 for no resizing)")
                     return False
-                self.config_data["width"] = int(input_widget.value)
+                
+                try:
+                    width_value = int(value)
+                    if width_value < 0:
+                        self._show_error(step_container, "Width must be 0 or greater")
+                        return False
+                    self.config_data["width"] = width_value
+                except ValueError:
+                    self._show_error(step_container, "Width must be a valid number")
+                    return False
                 
             elif step == "force_overwrite":
                 checkbox = self.query_one("#force-overwrite-field", Checkbox)
@@ -445,6 +575,26 @@ class ConfigurationForm(Screen):
         """Action for Enter key - same as clicking Next button."""
         self._next_step()
     
+    def on_key(self, event) -> None:
+        """Handle key events for the entire screen."""
+        if event.key == "enter":
+            # Check if we're focused on a radio button
+            focused = self.app.focused
+            if focused:
+                from textual.widgets import RadioButton
+                if isinstance(focused, RadioButton):
+                    # First, let the radio button toggle by simulating a space press
+                    # which is the standard way to select radio buttons
+                    focused.action_toggle()
+                    # Then proceed to next step after a refresh
+                    self.call_after_refresh(self._next_step)
+                    event.stop()
+                    return
+            
+            # For non-radio button elements, proceed normally
+            self._next_step()
+            event.stop()
+    
     def action_process(self) -> None:
         """Process the configuration and start Sharp Frames."""
         # Import here to avoid circular imports
@@ -460,7 +610,7 @@ class ConfigurationForm(Screen):
         """Prepare the final configuration for processing."""
         config = {
             "input_path": self.config_data.get("input_path"),
-            "input_type": self.config_data.get("input_type", "video"),
+            "input_type": self.config_data.get("input_type", InputTypes.VIDEO),
             "output_dir": self.config_data.get("output_dir"),
             "output_format": self.config_data.get("output_format", "jpg"),
             "width": self.config_data.get("width", 0),
@@ -468,7 +618,7 @@ class ConfigurationForm(Screen):
         }
         
         # Add video-specific config
-        if config["input_type"] == "video":
+        if config["input_type"] in [InputTypes.VIDEO, InputTypes.VIDEO_DIRECTORY]:
             config["fps"] = self.config_data.get("fps", 10)
         else:
             config["fps"] = 0

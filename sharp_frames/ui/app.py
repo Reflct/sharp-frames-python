@@ -15,4 +15,5 @@ class SharpFramesApp(App):
     
     def on_mount(self) -> None:
         """Start with the configuration form."""
+        self.theme = "flexoki"
         self.push_screen(ConfigurationForm()) 

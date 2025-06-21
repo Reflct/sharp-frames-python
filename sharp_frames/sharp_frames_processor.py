@@ -22,6 +22,9 @@ from .selection_methods import (
     select_outlier_removal_frames
 )
 
+# Import video directory utilities
+from .video_utils import get_video_files_in_directory
+
 # Define a custom exception for image processing errors
 class ImageProcessingError(Exception):
     pass
@@ -102,7 +105,7 @@ class SharpFrames:
              return False # Indicate setup failure
 
         # Check video-specific dependencies if needed
-        if self.input_type == "video":
+        if self.input_type in ["video", "video_directory"]:
             if not self._check_dependencies(check_ffmpeg=True):
                  return False # Check_dependencies already prints error
         return True
@@ -132,6 +135,15 @@ class SharpFrames:
             frame_paths = self._get_frame_paths()
             frame_count = len(frame_paths)
             print(f"Extracted {frame_count} frames")
+
+        elif self.input_type == "video_directory":
+            # Process all videos in directory
+            frame_paths = self._load_frames_from_video_directory()
+            frame_count = len(frame_paths)
+            cleanup_temp_dir = True  # We create temp directories for video extraction
+            if frame_count == 0:
+                print("No frames could be extracted from videos in directory.")
+                return [], cleanup_temp_dir
 
         elif self.input_type == "directory":
             # Scan input directory for images
@@ -215,8 +227,8 @@ class SharpFrames:
             if not frame_paths and self.input_type == "directory":
                  print("No images found or loaded. Exiting gracefully.")
                  return True # Not an error, just nothing to process
-            elif not frame_paths and self.input_type == "video":
-                 print("No frames extracted from video. Exiting.")
+            elif not frame_paths and self.input_type in ["video", "video_directory"]:
+                 print("No frames extracted from video(s). Exiting.")
                  # This might indicate an issue with extraction or an empty video
                  return False # Consider this potentially an error state
 
@@ -251,6 +263,69 @@ class SharpFrames:
                     print(f"Cleaned up temporary directory: {self.temp_dir}")
                 except Exception as e:
                     print(f"Warning: Could not clean up temporary directory: {str(e)}")
+
+    def _load_frames_from_video_directory(self) -> List[str]:
+        """Process all videos in directory and return aggregated frame paths."""
+        video_files = get_video_files_in_directory(self.input_path)
+        
+        if not video_files:
+            print(f"No video files found in directory: {self.input_path}")
+            return []
+
+        print(f"Processing {len(video_files)} video file(s)...")
+        
+        # Create main temporary directory for all video extractions
+        self.temp_dir = tempfile.mkdtemp()
+        all_frame_paths = []
+        
+        for i, video_path in enumerate(video_files, 1):
+            print(f"\nProcessing video {i}/{len(video_files)}: {os.path.basename(video_path)}")
+            
+            # Create subdirectory for this video
+            video_temp_dir = os.path.join(self.temp_dir, f"video_{i:03d}")
+            os.makedirs(video_temp_dir, exist_ok=True)
+            
+            # Temporarily set paths for single video processing
+            original_input_path = self.input_path
+            original_temp_dir = self.temp_dir
+            
+            try:
+                self.input_path = video_path
+                self.temp_dir = video_temp_dir
+                
+                # Extract video info and frames for this video
+                print("Extracting video information...")
+                try:
+                    video_info = self._get_video_info()
+                    duration = self._extract_duration(video_info)
+                    if duration:
+                        print(f"Video duration: {self._format_duration(duration)}")
+                except Exception as e:
+                    print(f"Warning: Could not extract video info for {os.path.basename(video_path)}: {e}")
+                    duration = None
+                
+                print(f"Extracting frames at {self.fps} fps...")
+                if self._extract_frames(duration):
+                    # Get frame paths from this video
+                    video_frame_paths = self._get_frame_paths()
+                    print(f"Extracted {len(video_frame_paths)} frames from {os.path.basename(video_path)}")
+                    
+                    # Add to aggregated list with updated indices
+                    for frame_path in video_frame_paths:
+                        all_frame_paths.append(frame_path)
+                else:
+                    print(f"Warning: Failed to extract frames from {os.path.basename(video_path)}")
+                    
+            except Exception as e:
+                print(f"Error processing video {os.path.basename(video_path)}: {e}")
+                continue
+            finally:
+                # Restore original paths
+                self.input_path = original_input_path
+                self.temp_dir = original_temp_dir
+        
+        print(f"\nTotal frames extracted from all videos: {len(all_frame_paths)}")
+        return all_frame_paths
 
     def _check_output_dir_overwrite(self):
         """Checks output directory and handles overwrite confirmation."""
@@ -590,7 +665,7 @@ class SharpFrames:
     def _calculate_sharpness(self, frame_paths: List[str]) -> List[Dict[str, Any]]:
         """Calculate sharpness scores for all frames/images using parallel processing."""
         frames_data = []
-        desc = "Calculating sharpness for frames" if self.input_type == "video" else "Calculating sharpness for images"
+        desc = "Calculating sharpness for frames" if self.input_type in ["video", "video_directory"] else "Calculating sharpness for images"
 
         # Use ThreadPoolExecutor for parallel processing
         # Adjust max_workers based on your system's capabilities, cpu_count() is a reasonable default
@@ -682,7 +757,7 @@ class SharpFrames:
             if self.input_type == "directory":
                 filename = original_id  # Use the original filename directly
             else:
-                # Use the defined constant format string for video frames
+                # Use the defined constant format string for video frames and video directory
                 filename = self.OUTPUT_FILENAME_FORMAT.format(
                     seq=i+1,
                     ext=self.output_format
@@ -690,7 +765,7 @@ class SharpFrames:
             dst_path = os.path.join(self.output_dir, filename)
 
             try:
-                # If width is set and we're in directory mode (video mode already handles this during extraction)
+                # If width is set and we're in directory mode (video modes already handle this during extraction)
                 if self.width > 0 and self.input_type == "directory":
                     # Load the image with OpenCV
                     img = cv2.imread(src_path)

@@ -24,6 +24,15 @@ class TestConfigurationFormLogic:
         assert form._should_show_step('input_type') is True  # Always shown
         assert form._should_show_step('output_dir') is True  # Always shown
     
+    def test_should_show_step_fps_for_video_directory(self):
+        """Test that FPS step is shown for video directory input."""
+        form = ConfigurationForm()
+        form.config_data = {'input_type': 'video_directory'}
+        
+        assert form._should_show_step('fps') is True
+        assert form._should_show_step('input_type') is True  # Always shown
+        assert form._should_show_step('output_dir') is True  # Always shown
+    
     def test_should_show_step_fps_for_directory(self):
         """Test that FPS step is hidden for directory input."""
         form = ConfigurationForm()
@@ -93,6 +102,31 @@ class TestConfigurationValidation:
         assert 'JPG' in summary  # Output format is uppercase
         assert '800px' in summary  # Width includes 'px'
         assert 'Yes' in summary  # Force overwrite shows as "Yes"
+    
+    def test_build_config_summary_video_directory_input(self, mock_form):
+        """Test configuration summary building for video directory input."""
+        mock_form.config_data = {
+            'input_type': 'video_directory',
+            'input_path': '/path/to/videos',
+            'output_dir': '/output',
+            'fps': 15,
+            'selection_method': 'best-n',
+            'param1': 5,
+            'output_format': 'jpg',
+            'width': 800,
+            'force_overwrite': True
+        }
+        
+        summary = mock_form._build_config_summary()
+        
+        # Check that key information is present
+        assert 'videos' in summary
+        assert '/output' in summary
+        assert 'FPS (per video): 15' in summary  # Should show fps with per video label
+        assert 'best-n' in summary
+        assert 'JPG' in summary
+        assert '800px' in summary
+        assert 'Yes' in summary
     
     def test_build_config_summary_directory_input(self, mock_form):
         """Test configuration summary building for directory input."""
@@ -189,6 +223,27 @@ class TestConfigurationValidation:
         assert 'batch_size' in final_config  # Will have default value, not necessarily 10
         # fps should be 0 for directory input (not absent)
         assert final_config['fps'] == 0
+    
+    def test_prepare_final_config_video_directory_method(self, mock_form):
+        """Test final config for video directory input."""
+        mock_form.config_data = {
+            'input_type': 'video_directory',
+            'input_path': '/path/to/videos',
+            'output_dir': '/output',
+            'fps': 15,
+            'selection_method': 'best-n',
+            'param1': 20,  # num_frames
+            'output_format': 'jpg',
+            'width': 800,
+            'force_overwrite': True
+        }
+        
+        final_config = mock_form._prepare_final_config()
+        
+        assert final_config['input_type'] == 'video_directory'
+        assert final_config['input_path'] == '/path/to/videos'
+        assert final_config['fps'] == 15  # Should have fps for video directory
+        assert final_config['selection_method'] == 'best-n'
     
     def test_prepare_final_config_outlier_removal_method(self, mock_form):
         """Test final config for outlier removal method."""

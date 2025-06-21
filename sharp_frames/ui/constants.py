@@ -14,6 +14,7 @@ class UIElementIds:
     INPUT_TYPE_RADIO = "input-type-radio"
     VIDEO_OPTION = "video-option"
     DIRECTORY_OPTION = "directory-option"
+    VIDEO_DIRECTORY_OPTION = "video-directory-option"
     INPUT_PATH_FIELD = "input-path-field"
     OUTPUT_DIR_FIELD = "output-dir-field"
     FPS_FIELD = "fps-field"
@@ -61,6 +62,7 @@ class InputTypes:
     """Constants for input types."""
     VIDEO = "video"
     DIRECTORY = "directory"
+    VIDEO_DIRECTORY = "video_directory"
 
 
 class OutputFormats:

@@ -38,11 +38,32 @@ def sample_video_path():
 
 
 @pytest.fixture
+def sample_video_directory():
+    """Mock video directory path for testing."""
+    return "/path/to/video/directory"
+
+
+@pytest.fixture
 def sample_config():
     """Sample configuration for testing."""
     return {
         'input_type': 'video',
         'input_path': '/path/to/video.mp4',
+        'output_dir': '/path/to/output',
+        'fps': 10,
+        'selection_method': 'best-n',
+        'output_format': 'jpg',
+        'width': 800,
+        'force_overwrite': False
+    }
+
+
+@pytest.fixture
+def sample_video_directory_config():
+    """Sample video directory configuration for testing."""
+    return {
+        'input_type': 'video_directory',
+        'input_path': '/path/to/video/directory',
         'output_dir': '/path/to/output',
         'fps': 10,
         'selection_method': 'best-n',

@@ -1,4 +1,4 @@
-"""Sharp Frames - Extract, score, and select the best frames from a video or image directory."""
+"""Sharp Frames - Extract, score, and select the best frames from a video, video directory, or image directory."""
 
 __version__ = "0.1.3"
 

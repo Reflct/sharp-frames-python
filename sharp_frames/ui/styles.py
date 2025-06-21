@@ -18,9 +18,9 @@ Footer {
 
 .title {
     text-align: center;
-    text-style: bold;
-    margin: 0;
+    margin: 0 0 1 0;
     color: $accent;
+    content-align: center middle;
 }
 
 .step-info {
@@ -39,6 +39,12 @@ Footer {
     margin: 0;
     color: $text-muted;
     text-style: italic;
+}
+
+.error-message {
+    margin: 0;
+    color: $error;
+    text-style: bold;
 }
 
 .summary {
