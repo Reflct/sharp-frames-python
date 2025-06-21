@@ -63,8 +63,9 @@ class SharpFramesApp(App):
         self.log.info("Blocking cancel action to prevent spurious app exit")
         return
         
-        # Original cancel behavior would be:
-        # super().action_cancel()
+        # When we want to allow legitimate cancels, uncomment this:
+        # self.log.info("Processing legitimate cancel action")
+        # self.exit("cancelled")
     
     def on_key(self, event: Key) -> None:
         """Solution 4: Handle and filter problematic key events."""

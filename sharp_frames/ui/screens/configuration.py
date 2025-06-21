@@ -442,7 +442,13 @@ class ConfigurationForm(Screen):
     
     def action_cancel(self) -> None:
         """Cancel the configuration and exit."""
-        self.app.exit("cancelled")
+        # Use the app's cancel action instead of direct exit
+        # This allows the app to filter spurious cancel actions
+        if hasattr(self.app, 'action_cancel'):
+            self.app.action_cancel()
+        else:
+            # Fallback if app doesn't have custom cancel handling
+            self.app.exit("cancelled")
     
     def action_help(self) -> None:
         """Show help information."""
