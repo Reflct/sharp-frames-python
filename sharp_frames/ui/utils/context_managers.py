@@ -12,15 +12,27 @@ from contextlib import contextmanager
 
 
 @contextmanager
-def managed_subprocess(command: List[str], timeout: Optional[float] = None) -> Generator[subprocess.Popen, None, None]:
+def managed_subprocess(command: List[str], timeout: Optional[float] = None, app_instance=None) -> Generator[subprocess.Popen, None, None]:
     """Context manager for subprocess with guaranteed cleanup.
+    
+    Args:
+        command: Command to execute as subprocess
+        timeout: Optional timeout (kept for compatibility but not used directly)
+        app_instance: Optional SharpFramesApp instance to handle signal restoration
     
     Note: This context manager yields the process without waiting for completion.
     The calling code is responsible for monitoring the process and handling timeouts.
     The timeout parameter is kept for compatibility but not used directly here.
     """
     process = None
+    signal_handlers_restored = False
+    
     try:
+        # Restore original signal handlers before running subprocess
+        if app_instance and hasattr(app_instance, 'restore_signal_handlers'):
+            app_instance.restore_signal_handlers()
+            signal_handlers_restored = True
+        
         process = subprocess.Popen(
             command,
             stdout=subprocess.PIPE,
@@ -38,6 +50,7 @@ def managed_subprocess(command: List[str], timeout: Optional[float] = None) -> G
             process.wait()
         raise e
     finally:
+        # Clean up subprocess
         if process:
             if process.poll() is None:  # Still running
                 process.terminate()
@@ -46,6 +59,10 @@ def managed_subprocess(command: List[str], timeout: Optional[float] = None) -> G
                 except subprocess.TimeoutExpired:
                     process.kill()
                     process.wait()
+        
+        # Reinstall app signal handlers
+        if signal_handlers_restored and app_instance and hasattr(app_instance, 'reinstall_signal_handlers'):
+            app_instance.reinstall_signal_handlers()
 
 
 @contextmanager

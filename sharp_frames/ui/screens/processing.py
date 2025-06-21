@@ -230,8 +230,13 @@ class ProcessingScreen(Screen):
             try:
                 # Remove progress_callback from config to avoid duplicate argument
                 clean_config = {k: v for k, v in processor_config.items() if k != 'progress_callback'}
-                self.processor = MinimalProgressSharpFrames(progress_callback=self._progress_callback, **clean_config)
-                self.app.call_from_thread(self._update_debug_info, f"Using progress-enabled SharpFrames processor")
+                # Pass app instance for signal handling on macOS
+                self.processor = MinimalProgressSharpFrames(
+                    progress_callback=self._progress_callback, 
+                    app_instance=self.app,
+                    **clean_config
+                )
+                self.app.call_from_thread(self._update_debug_info, f"Using progress-enabled SharpFrames processor with macOS compatibility")
             except Exception as init_error:
                 self.last_error = init_error
                 error_msg = ErrorContext.analyze_processing_failure(self.config, init_error)

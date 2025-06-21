@@ -29,18 +29,60 @@ class SharpFramesApp(App):
         self._last_escape_time = 0
         self._escape_count = 0
         self._last_action_time = 0
+        self._original_signal_handlers = {}
         super().__init__(**kwargs)
     
     def setup_signal_handlers(self):
-        """Solution 1: Setup signal handlers for macOS compatibility."""
+        """Solution 1: Setup signal handlers for macOS compatibility.
+        
+        Note: These handlers only affect the main app process, not subprocesses.
+        We store original handlers so we can restore them when running subprocesses.
+        """
         def signal_handler(signum, frame):
-            self.log.info(f"Received signal {signum}, ignoring to prevent premature exit")
-            # Don't exit, just log
+            self.log.info(f"Received signal {signum} in main app, ignoring to prevent premature exit")
+            # Don't exit, just log - but only for the main app process
         
         # Handle common signals that might cause issues on macOS
-        signal.signal(signal.SIGTERM, signal_handler)
-        signal.signal(signal.SIGHUP, signal_handler)
-        signal.signal(signal.SIGPIPE, signal_handler)
+        # Only register signals that exist on the current platform
+        signals_to_handle = []
+        
+        try:
+            if hasattr(signal, 'SIGTERM'):
+                signals_to_handle.append(signal.SIGTERM)
+        except AttributeError:
+            pass
+        
+        try:
+            if hasattr(signal, 'SIGHUP'):
+                signals_to_handle.append(signal.SIGHUP)
+        except AttributeError:
+            pass  # Signal not available on this platform (Windows)
+        
+        try:
+            if hasattr(signal, 'SIGPIPE'):
+                signals_to_handle.append(signal.SIGPIPE)
+        except AttributeError:
+            pass  # Signal not available on this platform (Windows)
+        
+        # Install handlers and store originals
+        for sig in signals_to_handle:
+            try:
+                self._original_signal_handlers[sig] = signal.signal(sig, signal_handler)
+            except (ValueError, OSError):
+                # Can't handle this signal in this context
+                pass
+    
+    def restore_signal_handlers(self):
+        """Restore original signal handlers before running subprocesses."""
+        for sig, original_handler in self._original_signal_handlers.items():
+            try:
+                signal.signal(sig, original_handler)
+            except (ValueError, OSError):
+                pass
+    
+    def reinstall_signal_handlers(self):
+        """Reinstall app signal handlers after subprocess completion."""
+        self.setup_signal_handlers()
     
     def action_cancel(self) -> None:
         """Override cancel action to prevent spurious exits from ANSI sequences."""

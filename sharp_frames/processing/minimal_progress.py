@@ -24,10 +24,11 @@ from ..ui.utils import managed_subprocess, managed_temp_directory, managed_threa
 class MinimalProgressSharpFrames(SharpFrames):
     """Minimal SharpFrames extension that only intercepts progress without breaking functionality."""
     
-    def __init__(self, progress_callback=None, **kwargs):
+    def __init__(self, progress_callback=None, app_instance=None, **kwargs):
         self.progress_callback = progress_callback
-        # Remove progress_callback from kwargs before passing to parent
-        clean_kwargs = {k: v for k, v in kwargs.items() if k != 'progress_callback'}
+        self.app_instance = app_instance  # Store app instance for signal handling
+        # Remove progress_callback and app_instance from kwargs before passing to parent
+        clean_kwargs = {k: v for k, v in kwargs.items() if k not in ['progress_callback', 'app_instance']}
         super().__init__(**clean_kwargs)
     
     def _update_progress(self, phase: str, current: int, total: int, description: str = ""):
@@ -198,7 +199,9 @@ class MinimalProgressSharpFrames(SharpFrames):
         # Check result with improved error handling
         if return_code != 0:
             stderr_output = ''.join(stderr_buffer) if stderr_buffer else ""
-            error_message = ErrorContext.analyze_ffmpeg_error(return_code, stderr_output, self.input_path)
+            error_message = f"FFmpeg failed with exit code {return_code}."
+            if stderr_output:
+                error_message += f" FFmpeg stderr: {stderr_output}"
             raise Exception(error_message)
 
         return True
@@ -227,7 +230,8 @@ class MinimalProgressSharpFrames(SharpFrames):
         stderr_buffer = []  # Bounded buffer for stderr
 
         try:
-            with managed_subprocess(command, ProcessingConfig.FFMPEG_TIMEOUT_SECONDS) as process:
+            # Pass app_instance to managed_subprocess for signal handling
+            with managed_subprocess(command, ProcessingConfig.FFMPEG_TIMEOUT_SECONDS, self.app_instance) as process:
                 # Use ExitStack to manage multiple resources
                 with ExitStack() as stack:
                     stderr_queue = queue.Queue()
