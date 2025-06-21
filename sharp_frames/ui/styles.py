@@ -19,7 +19,7 @@ Footer {
 .title {
     text-align: center;
     margin: 0 0 1 0;
-    color: $accent;
+    color: #3190FF;
     content-align: center middle;
 }
 
@@ -32,7 +32,7 @@ Footer {
 .question {
     text-style: bold;
     margin: 1 0 0 0;
-    color: $primary;
+    color: #3190FF;
 }
 
 .hint {
@@ -50,7 +50,7 @@ Footer {
 .summary {
     margin: 1 0;
     padding: 1;
-    border: solid $primary;
+    border: solid #3190FF;
     background: $surface;
 }
 

@@ -12,6 +12,7 @@ class SharpFramesApp(App):
     """Main Sharp Frames Textual application."""
     
     CSS = SHARP_FRAMES_CSS
+    TITLE = "Sharp Frames - by Reflct.app"
     
     def on_mount(self) -> None:
         """Start with the configuration form."""

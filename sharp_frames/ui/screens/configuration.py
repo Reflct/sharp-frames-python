@@ -47,11 +47,12 @@ class ConfigurationForm(Screen):
         """Create the wizard layout."""
         yield Header()
         ascii_title = """
- ███████ ██   ██  █████  ██████  ██████     ███████ ██████   █████  ███    ███ ███████ ███████ 
- ██      ██   ██ ██   ██ ██   ██ ██   ██    ██      ██   ██ ██   ██ ████  ████ ██      ██      
- ███████ ███████ ███████ ██████  ██████     █████   ██████  ███████ ██ ████ ██ █████   ███████ 
-      ██ ██   ██ ██   ██ ██   ██ ██         ██      ██   ██ ██   ██ ██  ██  ██ ██           ██ 
- ███████ ██   ██ ██   ██ ██   ██ ██         ██      ██   ██ ██   ██ ██      ██ ███████ ███████ 
+███████[#2575E6]╗[/#2575E6]██[#2575E6]╗[/#2575E6]  ██[#2575E6]╗[/#2575E6] █████[#2575E6]╗[/#2575E6] ██████[#2575E6]╗[/#2575E6] ██████[#2575E6]╗[/#2575E6]     ███████[#2575E6]╗[/#2575E6]██████[#2575E6]╗[/#2575E6]  █████[#2575E6]╗[/#2575E6] ███[#2575E6]╗[/#2575E6]   ███[#2575E6]╗[/#2575E6]███████[#2575E6]╗[/#2575E6]███████[#2575E6]╗[/#2575E6]
+██[#2575E6]╔[/#2575E6][#2575E6]════╝[/#2575E6]██[#2575E6]║[/#2575E6]  ██[#2575E6]║[/#2575E6]██[#2575E6]╔══[/#2575E6]██[#2575E6]╗[/#2575E6]██[#2575E6]╔══[/#2575E6]██[#2575E6]╗[/#2575E6]██[#2575E6]╔══[/#2575E6]██[#2575E6]╗[/#2575E6]    ██[#2575E6]╔[/#2575E6][#2575E6]════╝[/#2575E6]██[#2575E6]╔══[/#2575E6]██[#2575E6]╗[/#2575E6]██[#2575E6]╔══[/#2575E6]██[#2575E6]╗[/#2575E6]████[#2575E6]╗[/#2575E6] ████[#2575E6]║[/#2575E6]██[#2575E6]╔[/#2575E6][#2575E6]════╝[/#2575E6]██[#2575E6]╔[/#2575E6][#2575E6]════╝[/#2575E6]
+███████[#2575E6]╗[/#2575E6]███████[#2575E6]║[/#2575E6]███████[#2575E6]║[/#2575E6]██████[#2575E6]╔╝[/#2575E6]██████[#2575E6]╔╝[/#2575E6]    █████[#2575E6]╗[/#2575E6]  ██████[#2575E6]╔╝[/#2575E6]███████[#2575E6]║[/#2575E6]██[#2575E6]╔[/#2575E6]████[#2575E6]╔[/#2575E6]██[#2575E6]║[/#2575E6]█████[#2575E6]╗[/#2575E6]  ███████[#2575E6]╗[/#2575E6]
+[#2575E6]╚[/#2575E6][#2575E6]════[/#2575E6]██[#2575E6]║[/#2575E6]██[#2575E6]╔══[/#2575E6]██[#2575E6]║[/#2575E6]██[#2575E6]╔══[/#2575E6]██[#2575E6]║[/#2575E6]██[#2575E6]╔══[/#2575E6]██[#2575E6]╗[/#2575E6]██[#2575E6]╔═══╝[/#2575E6]     ██[#2575E6]╔══╝[/#2575E6]  ██[#2575E6]╔══[/#2575E6]██[#2575E6]╗[/#2575E6]██[#2575E6]╔══[/#2575E6]██[#2575E6]║[/#2575E6]██[#2575E6]║╚[/#2575E6]██[#2575E6]╔╝[/#2575E6]██[#2575E6]║[/#2575E6]██[#2575E6]╔══╝[/#2575E6]  [#2575E6]╚[/#2575E6][#2575E6]════[/#2575E6]██[#2575E6]║[/#2575E6]
+███████[#2575E6]║[/#2575E6]██[#2575E6]║[/#2575E6]  ██[#2575E6]║[/#2575E6]██[#2575E6]║[/#2575E6]  ██[#2575E6]║[/#2575E6]██[#2575E6]║[/#2575E6]  ██[#2575E6]║[/#2575E6]██[#2575E6]║[/#2575E6]         ██[#2575E6]║[/#2575E6]     ██[#2575E6]║[/#2575E6]  ██[#2575E6]║[/#2575E6]██[#2575E6]║[/#2575E6]  ██[#2575E6]║[/#2575E6]██[#2575E6]║[/#2575E6] [#2575E6]╚═╝[/#2575E6] ██[#2575E6]║[/#2575E6]███████[#2575E6]╗[/#2575E6]███████[#2575E6]║[/#2575E6]
+[#2575E6]╚══════╝╚═╝[/#2575E6]  [#2575E6]╚═╝╚═╝[/#2575E6]  [#2575E6]╚═╝╚═╝[/#2575E6]  [#2575E6]╚═╝╚═╝[/#2575E6]         [#2575E6]╚═╝[/#2575E6]     [#2575E6]╚═╝[/#2575E6]  [#2575E6]╚═╝╚═╝[/#2575E6]  [#2575E6]╚═╝╚═╝[/#2575E6]     [#2575E6]╚═╝╚══════╝╚══════╝[/#2575E6]
         """
         yield Static(ascii_title, classes="title")
         yield Static("", id="step-info", classes="step-info")
@@ -169,12 +170,25 @@ class ConfigurationForm(Screen):
         radio_set.mount(video_dir_radio)
         radio_set.mount(dir_radio)
         
+        # Add description label
+        description_label = Label("Extract and select the sharpest frames of a single video", 
+                                classes="hint", id="input-type-description")
+        container.mount(description_label)
+        
         # Set current value if exists
         if "input_type" in self.config_data:
             current_type = self.config_data["input_type"]
             video_radio.value = current_type == InputTypes.VIDEO
             video_dir_radio.value = current_type == InputTypes.VIDEO_DIRECTORY
             dir_radio.value = current_type == InputTypes.DIRECTORY
+            
+            # Update description based on current selection
+            if current_type == InputTypes.VIDEO:
+                description_label.update("Extract and select the sharpest frames of a single video")
+            elif current_type == InputTypes.VIDEO_DIRECTORY:
+                description_label.update("Extract and select the sharpest frames of all videos in a folder")
+            elif current_type == InputTypes.DIRECTORY:
+                description_label.update("Select the sharpest images from a folder")
     
     def _create_input_path_step(self, container) -> None:
         """Create the input path step."""
@@ -230,11 +244,26 @@ class ConfigurationForm(Screen):
         """Create the selection method step."""
         container.mount(Label("Which frame selection method would you like to use?", classes="question"))
         select_widget = Select([
-            ("Best N frames - Select the sharpest frames", "best-n"),
+            ("Best N frames - Choose a specific number of frames", "best-n"),
             ("Batched selection - Best frame from each batch", "batched"),
-            ("Outlier removal - Remove blurry frames", "outlier-removal")
+            ("Outlier removal - Remove the blurriest frames", "outlier-removal")
         ], value=self.config_data.get("selection_method", "best-n"), id="selection-method-field")
         container.mount(select_widget)
+        
+        # Add description label
+        current_method = self.config_data.get("selection_method", "best-n")
+        description_text = self._get_method_description(current_method)
+        description_label = Label(description_text, classes="hint", id="selection-method-description")
+        container.mount(description_label)
+    
+    def _get_method_description(self, method: str) -> str:
+        """Get description text for a selection method."""
+        descriptions = {
+            "best-n": "Selects the N sharpest frames from the entire video with minimum spacing between frames",
+            "batched": "Divides frames into batches and selects the sharpest frame from each batch for even distribution",
+            "outlier-removal": "Analyzes frame sharpness and removes unusually blurry frames to keep the clearest ones"
+        }
+        return descriptions.get(method, "")
     
     def _create_method_params_step(self, container) -> None:
         """Create the method-specific parameters step."""
@@ -575,6 +604,33 @@ class ConfigurationForm(Screen):
             
         except Exception:
             return False
+    
+    def on_radio_set_changed(self, event: RadioSet.Changed) -> None:
+        """Handle radio button changes to update descriptions."""
+        if event.radio_set.id == UIElementIds.INPUT_TYPE_RADIO:
+            try:
+                description_label = self.query_one("#input-type-description", expect_type=Label)
+                
+                if event.pressed.id == UIElementIds.VIDEO_OPTION:
+                    description_label.update("Extract and select the sharpest frames of a single video")
+                elif event.pressed.id == UIElementIds.VIDEO_DIRECTORY_OPTION:
+                    description_label.update("Extract and select the sharpest frames of all videos in a folder")
+                elif event.pressed.id == UIElementIds.DIRECTORY_OPTION:
+                    description_label.update("Select the sharpest images from a folder")
+            except Exception:
+                # Ignore if description label doesn't exist (not on input type step)
+                pass
+    
+    def on_select_changed(self, event: Select.Changed) -> None:
+        """Handle select widget changes to update descriptions."""
+        if event.select.id == "selection-method-field":
+            try:
+                description_label = self.query_one("#selection-method-description", expect_type=Label)
+                description_text = self._get_method_description(str(event.value))
+                description_label.update(description_text)
+            except Exception:
+                # Ignore if description label doesn't exist (not on selection method step)
+                pass
     
     def action_cancel(self) -> None:
         """Cancel the configuration."""
