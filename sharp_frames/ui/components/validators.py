@@ -3,7 +3,7 @@ Validation components for Sharp Frames UI.
 """
 
 import os
-from typing import Optional
+from typing import Optional, Set, List
 from pathlib import Path
 
 from textual.widgets import Input
@@ -34,6 +34,206 @@ class PathValidator(Validator):
             
             if self.must_be_dir and not path.is_dir():
                 return self.failure("Path must be a directory")
+        
+        return self.success()
+
+
+class VideoFileValidator(Validator):
+    """Validator specifically for video files with format checking."""
+    
+    # Common video file extensions
+    SUPPORTED_VIDEO_EXTENSIONS = {
+        '.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.webm', 
+        '.m4v', '.3gp', '.ogv', '.ts', '.mts', '.m2ts'
+    }
+    
+    def __init__(self, must_exist: bool = True):
+        self.must_exist = must_exist
+        super().__init__()
+    
+    def validate(self, value: str) -> ValidationResult:
+        if not value.strip():
+            return self.failure("Please enter a video file path (e.g., /path/to/video.mp4)")
+        
+        path = Path(os.path.expanduser(value.strip()))
+        
+        # Check file extension first (even if file doesn't exist yet)
+        if path.suffix.lower() not in self.SUPPORTED_VIDEO_EXTENSIONS:
+            supported_formats = ', '.join(sorted(self.SUPPORTED_VIDEO_EXTENSIONS))
+            return self.failure(f"Please select a video file. Supported formats: {supported_formats}")
+        
+        if self.must_exist:
+            if not path.exists():
+                return self.failure(f"Video file not found: {path}")
+            
+            if not path.is_file():
+                return self.failure("Path must be a video file, not a directory")
+            
+            # Check if file is readable and not empty
+            try:
+                file_size = path.stat().st_size
+                if file_size == 0:
+                    return self.failure("Video file is empty")
+                elif file_size < 1024:  # Less than 1KB is suspicious
+                    return self.failure(f"Video file is very small ({file_size} bytes) - may be corrupted")
+            except (OSError, PermissionError):
+                return self.failure("Cannot access video file - check permissions")
+        
+        return self.success()
+
+
+class VideoDirectoryValidator(Validator):
+    """Validator for directories containing video files."""
+    
+    def __init__(self, must_exist: bool = True, min_videos: int = 1):
+        self.must_exist = must_exist
+        self.min_videos = min_videos
+        super().__init__()
+    
+    def validate(self, value: str) -> ValidationResult:
+        if not value.strip():
+            return self.failure("Please enter a directory path containing video files")
+        
+        path = Path(os.path.expanduser(value.strip()))
+        
+        if self.must_exist:
+            if not path.exists():
+                return self.failure(f"Directory not found: {path}")
+            
+            if not path.is_dir():
+                return self.failure("Path must be a directory, not a file")
+            
+            # Check for video files in directory
+            try:
+                video_files = self._find_video_files(path)
+                if len(video_files) < self.min_videos:
+                    if len(video_files) == 0:
+                        return self.failure("No video files found in directory. Please select a directory containing video files.")
+                    else:
+                        return self.failure(f"Found only {len(video_files)} video file(s), need at least {self.min_videos}")
+                
+            except (OSError, PermissionError):
+                return self.failure("Cannot access directory - check permissions")
+        
+        return self.success()
+    
+    def _find_video_files(self, directory: Path) -> List[Path]:
+        """Find video files in the given directory."""
+        video_extensions = VideoFileValidator.SUPPORTED_VIDEO_EXTENSIONS
+        video_files = []
+        
+        try:
+            for file_path in directory.iterdir():
+                if file_path.is_file() and file_path.suffix.lower() in video_extensions:
+                    video_files.append(file_path)
+        except (OSError, PermissionError):
+            pass
+        
+        return video_files
+
+
+class ImageDirectoryValidator(Validator):
+    """Validator for directories containing image files."""
+    
+    # Common image file extensions
+    SUPPORTED_IMAGE_EXTENSIONS = {
+        '.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif', 
+        '.webp', '.gif', '.ppm', '.pgm', '.pbm'
+    }
+    
+    def __init__(self, must_exist: bool = True, min_images: int = 1):
+        self.must_exist = must_exist
+        self.min_images = min_images
+        super().__init__()
+    
+    def validate(self, value: str) -> ValidationResult:
+        if not value.strip():
+            return self.failure("Please enter a directory path containing image files")
+        
+        path = Path(os.path.expanduser(value.strip()))
+        
+        if self.must_exist:
+            if not path.exists():
+                return self.failure(f"Directory not found: {path}")
+            
+            if not path.is_dir():
+                return self.failure("Path must be a directory, not a file")
+            
+            # Check for image files in directory
+            try:
+                image_files = self._find_image_files(path)
+                if len(image_files) < self.min_images:
+                    if len(image_files) == 0:
+                        supported_formats = ', '.join(sorted(self.SUPPORTED_IMAGE_EXTENSIONS))
+                        return self.failure(f"No image files found in directory. Supported formats: {supported_formats}")
+                    else:
+                        return self.failure(f"Found only {len(image_files)} image file(s), need at least {self.min_images}")
+                
+            except (OSError, PermissionError):
+                return self.failure("Cannot access directory - check permissions")
+        
+        return self.success()
+    
+    def _find_image_files(self, directory: Path) -> List[Path]:
+        """Find image files in the given directory."""
+        image_files = []
+        
+        try:
+            for file_path in directory.iterdir():
+                if file_path.is_file() and file_path.suffix.lower() in self.SUPPORTED_IMAGE_EXTENSIONS:
+                    image_files.append(file_path)
+        except (OSError, PermissionError):
+            pass
+        
+        return image_files
+
+
+class OutputDirectoryValidator(Validator):
+    """Validator for output directories with creation capability."""
+    
+    def __init__(self, create_if_missing: bool = True):
+        self.create_if_missing = create_if_missing
+        super().__init__()
+    
+    def validate(self, value: str) -> ValidationResult:
+        if not value.strip():
+            return self.failure("Please enter an output directory path")
+        
+        path = Path(os.path.expanduser(value.strip()))
+        
+        # Check if path exists
+        if path.exists():
+            if not path.is_dir():
+                return self.failure("Output path exists but is not a directory")
+            
+            # Check if directory is writable
+            try:
+                # Try creating a temporary file to test write permissions
+                test_file = path / ".write_test"
+                test_file.touch()
+                test_file.unlink()  # Clean up
+            except (OSError, PermissionError):
+                return self.failure("No write permission for output directory")
+        else:
+            # Directory doesn't exist
+            if self.create_if_missing:
+                # Check if parent directory exists and is writable
+                parent = path.parent
+                if not parent.exists():
+                    return self.failure(f"Parent directory does not exist: {parent}")
+                
+                if not parent.is_dir():
+                    return self.failure(f"Parent path is not a directory: {parent}")
+                
+                try:
+                    # Test write permission on parent directory
+                    test_file = parent / ".write_test"
+                    test_file.touch()
+                    test_file.unlink()  # Clean up
+                except (OSError, PermissionError):
+                    return self.failure(f"No write permission to create directory in: {parent}")
+            else:
+                return self.failure("Output directory does not exist")
         
         return self.success()
 
@@ -102,4 +302,16 @@ class ValidationHelpers:
         try:
             return int(widget.value.strip())
         except (ValueError, AttributeError):
-            return default 
+            return default
+    
+    @staticmethod
+    def create_input_validator(input_type: str, must_exist: bool = True):
+        """Factory method to create appropriate validator based on input type."""
+        if input_type == "video":
+            return VideoFileValidator(must_exist=must_exist)
+        elif input_type == "video_directory":
+            return VideoDirectoryValidator(must_exist=must_exist)
+        elif input_type == "directory":
+            return ImageDirectoryValidator(must_exist=must_exist)
+        else:
+            return PathValidator(must_exist=must_exist) 

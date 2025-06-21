@@ -9,6 +9,7 @@ import pytest
 from unittest.mock import Mock, patch
 
 from sharp_frames.ui.screens.configuration import ConfigurationForm
+from sharp_frames.ui.components.step_handlers import ConfirmStepHandler
 from sharp_frames.ui.constants import InputTypes
 
 
@@ -86,13 +87,16 @@ class TestConfigurationValidation:
             'output_dir': '/output',
             'fps': 10,
             'selection_method': 'best-n',
-            'param1': 5,
+            'num_frames': 300,
+            'min_buffer': 3,
             'output_format': 'jpg',
             'width': 800,
             'force_overwrite': True
         }
         
-        summary = mock_form._build_config_summary()
+        # Use the ConfirmStepHandler to build the summary
+        handler = ConfirmStepHandler(mock_form.config_data)
+        summary = handler._build_config_summary()
         
         # Check that key information is present
         assert 'video.mp4' in summary
@@ -111,13 +115,16 @@ class TestConfigurationValidation:
             'output_dir': '/output',
             'fps': 15,
             'selection_method': 'best-n',
-            'param1': 5,
+            'num_frames': 300,
+            'min_buffer': 3,
             'output_format': 'jpg',
             'width': 800,
             'force_overwrite': True
         }
         
-        summary = mock_form._build_config_summary()
+        # Use the ConfirmStepHandler to build the summary
+        handler = ConfirmStepHandler(mock_form.config_data)
+        summary = handler._build_config_summary()
         
         # Check that key information is present
         assert 'videos' in summary
@@ -135,13 +142,16 @@ class TestConfigurationValidation:
             'input_path': '/path/to/images',
             'output_dir': '/output',
             'selection_method': 'batched',
-            'param1': 10,
+            'batch_size': 10,
+            'batch_buffer': 2,
             'output_format': 'png',  # This will be ignored for directory input
             'width': 1024,  # This will be ignored for directory input
             'force_overwrite': False
         }
         
-        summary = mock_form._build_config_summary()
+        # Use the ConfirmStepHandler to build the summary
+        handler = ConfirmStepHandler(mock_form.config_data)
+        summary = handler._build_config_summary()
         
         # Check that key information is present
         assert 'images' in summary
@@ -160,19 +170,20 @@ class TestConfigurationValidation:
             'output_dir': '/output',
             'fps': 15,
             'selection_method': 'outlier-removal',
-            'param1': 2.0,  # Threshold
-            'param2': 0.8,  # Keep ratio
+            'outlier_window_size': 15,
+            'outlier_sensitivity': 50,
             'output_format': 'jpg',
             'width': 800,
             'force_overwrite': False
         }
         
-        summary = mock_form._build_config_summary()
+        # Use the ConfirmStepHandler to build the summary
+        handler = ConfirmStepHandler(mock_form.config_data)
+        summary = handler._build_config_summary()
         
         assert 'outlier-removal' in summary
-        # The implementation uses default values, not the param1/param2 directly
-        assert 'Window size: 15' in summary  # Default window size
-        assert 'Sensitivity: 50' in summary  # Default sensitivity
+        assert 'Window size: 15' in summary
+        assert 'Sensitivity: 50' in summary
     
     def test_prepare_final_config_removes_ui_fields(self, mock_form):
         """Test that final config removes UI-specific fields."""
@@ -182,8 +193,8 @@ class TestConfigurationValidation:
             'output_dir': '/output',
             'fps': 10,
             'selection_method': 'best-n',
-            'param1': 5,
-            'param2': None,  # Should be filtered out
+            'num_frames': 300,
+            'min_buffer': 3,
             'output_format': 'jpg',
             'width': 800,
             'force_overwrite': True
