@@ -5,6 +5,28 @@ All notable changes to the Sharp Frames project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2025-01-XX
+
+### Added
+- Textual-based UI as default interface
+- Step-by-step configuration with validation
+- Video directory processing - process all videos in a folder
+- Path validators with existence and permission checking
+- Numeric field validators with range validation
+- Thread-safe subprocess management and cleanup
+- Tests
+
+### Changed
+- Default behavior: `sharp-frames` now launches textual interface
+- Legacy interactive mode moved to `--interactive` flag
+- Improved error messages with actionable context
+- Enhanced configuration parameter handling
+
+### Fixed
+- Configuration parameter mapping and validation
+- Resource cleanup for temporary files and subprocesses
+- Error reporting specificity and usefulness
+
 ## [0.1.3] - 2025-05-15
 
 ### Added

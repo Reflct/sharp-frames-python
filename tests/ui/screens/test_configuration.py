@@ -186,7 +186,7 @@ class TestConfigurationValidation:
         assert 'Sensitivity: 50' in summary
     
     def test_prepare_final_config_removes_ui_fields(self, mock_form):
-        """Test that final config removes UI-specific fields."""
+        """Test that final config copies config_data and removes None values."""
         mock_form.config_data = {
             'input_type': 'video',
             'input_path': '/video.mp4',
@@ -199,22 +199,27 @@ class TestConfigurationValidation:
             'width': 800,
             'force_overwrite': True
         }
-        
+
         final_config = mock_form._prepare_final_config()
-        
-        # Check that proper mapping occurred
+
+        # Check that all non-None values are copied
         assert final_config['input_type'] == 'video'
         assert final_config['input_path'] == '/video.mp4'
         assert final_config['output_dir'] == '/output'
         assert final_config['fps'] == 10
-        assert final_config['selection_method'] == 'best-n'  # Actual key name
+        assert final_config['selection_method'] == 'best-n'
         assert final_config['output_format'] == 'jpg'
         assert final_config['width'] == 800
         assert final_config['force_overwrite'] is True
-        
-        # All method parameters should be present with defaults
+
+        # Only method parameters that were set should be present
         assert 'num_frames' in final_config
-        assert 'batch_size' in final_config
+        assert final_config['num_frames'] == 300
+        assert 'min_buffer' in final_config
+        assert final_config['min_buffer'] == 3
+        
+        # Parameters not in config_data should not be present
+        assert 'batch_size' not in final_config
     
     def test_prepare_final_config_batched_method(self, mock_form):
         """Test final config for batched method."""
@@ -223,21 +228,29 @@ class TestConfigurationValidation:
             'input_path': '/images',
             'output_dir': '/output',
             'selection_method': 'batched',
-            'param1': 10,  # batch_size
-            'output_format': 'png',  # Will be overridden to 'preserve' for directory
-            'width': 1024,  # Will be overridden to 0 for directory
+            'batch_size': 10,  # Set proper parameter name
+            'batch_buffer': 2,  # Set proper parameter name
+            'output_format': 'png',
+            'width': 1024,
             'force_overwrite': False
         }
         
         final_config = mock_form._prepare_final_config()
         
+        # Check that values are copied as-is
         assert final_config['selection_method'] == 'batched'
-        assert 'batch_size' in final_config  # Will have default value, not necessarily 10
-        # fps should be 0 for directory input (not absent)
-        assert final_config['fps'] == 0
-        # For directory input, format should be placeholder 'jpg' (not used anyway) and width should be 0
-        assert final_config['output_format'] == 'jpg'
-        assert final_config['width'] == 0
+        assert final_config['input_type'] == 'directory'
+        assert final_config['input_path'] == '/images'
+        assert final_config['output_dir'] == '/output'
+        assert final_config['output_format'] == 'png'
+        assert final_config['width'] == 1024
+        assert final_config['force_overwrite'] is False
+        
+        # Only parameters that were actually set should be present
+        assert 'batch_size' in final_config
+        assert final_config['batch_size'] == 10
+        assert 'batch_buffer' in final_config
+        assert final_config['batch_buffer'] == 2
     
     def test_prepare_final_config_video_directory_method(self, mock_form):
         """Test final config for video directory input."""
@@ -268,8 +281,8 @@ class TestConfigurationValidation:
             'output_dir': '/output',
             'fps': 5,
             'selection_method': 'outlier-removal',
-            'param1': 1.5,  # threshold
-            'param2': 0.9,  # keep_ratio
+            'outlier_window_size': 15,  # Set proper parameter name
+            'outlier_sensitivity': 50,  # Set proper parameter name
             'output_format': 'jpg',
             'width': 800,
             'force_overwrite': True
@@ -277,10 +290,21 @@ class TestConfigurationValidation:
         
         final_config = mock_form._prepare_final_config()
         
+        # Check that values are copied as-is
         assert final_config['selection_method'] == 'outlier-removal'
-        # Implementation uses different parameter names
-        assert 'outlier_window_size' in final_config
+        assert final_config['input_type'] == 'video'
+        assert final_config['input_path'] == '/video.mp4'
+        assert final_config['output_dir'] == '/output'
+        assert final_config['fps'] == 5
+        assert final_config['output_format'] == 'jpg'
+        assert final_config['width'] == 800
+        assert final_config['force_overwrite'] is True
+        
+        # Only parameters that were actually set should be present
+        assert 'outlier_window_size' in final_config  
+        assert final_config['outlier_window_size'] == 15
         assert 'outlier_sensitivity' in final_config
+        assert final_config['outlier_sensitivity'] == 50
     
     def test_prepare_final_config_removes_none_values(self, mock_form):
         """Test that None values are filtered out of final config."""
@@ -290,8 +314,8 @@ class TestConfigurationValidation:
             'output_dir': '/output',
             'fps': None,  # Should be filtered
             'selection_method': 'best-n',
-            'param1': 5,
-            'param2': None,  # Should be filtered
+            'num_frames': 300,  # Non-None value
+            'min_buffer': None,  # Should be filtered
             'output_format': 'jpg',
             'width': None,  # Should be filtered
             'force_overwrite': False
@@ -299,15 +323,19 @@ class TestConfigurationValidation:
         
         final_config = mock_form._prepare_final_config()
         
-        # The implementation preserves None for some values that come from config_data
-        # Only gets default when the value isn't in config_data at all
-        assert final_config['fps'] is None or final_config['fps'] == 10  # May preserve None
-        assert final_config['width'] is None or final_config['width'] == 0  # May preserve None
+        # None values should be filtered out
+        assert 'fps' not in final_config
+        assert 'min_buffer' not in final_config  
+        assert 'width' not in final_config
         
         # Non-None values should be present
         assert final_config['input_type'] == 'video'
+        assert final_config['input_path'] == '/video.mp4'
+        assert final_config['output_dir'] == '/output'
         assert final_config['selection_method'] == 'best-n'
-        assert 'num_frames' in final_config  # Has default values
+        assert final_config['num_frames'] == 300
+        assert final_config['output_format'] == 'jpg'
+        assert final_config['force_overwrite'] is False
 
 
 class TestConfigurationStepCounting:
