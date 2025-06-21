@@ -5,6 +5,7 @@ Main Sharp Frames Textual application.
 import signal
 import os
 import time
+import re
 from textual.app import App
 from textual.events import Key
 
@@ -27,55 +28,57 @@ class SharpFramesApp(App):
         # Track spurious escape sequences
         self._last_escape_time = 0
         self._escape_count = 0
-        
         super().__init__(**kwargs)
     
     def setup_signal_handlers(self):
         """Solution 1: Setup signal handlers for macOS compatibility."""
         def signal_handler(signum, frame):
-            self.log(f"Received signal {signum}")
-            # Don't exit immediately, let textual handle cleanup
-            return
-            
+            self.log.info(f"Received signal {signum}, ignoring to prevent premature exit")
+            # Don't exit, just log
+        
+        # Handle common signals that might cause issues on macOS
         signal.signal(signal.SIGTERM, signal_handler)
         signal.signal(signal.SIGHUP, signal_handler)
         signal.signal(signal.SIGPIPE, signal_handler)
     
     def on_key(self, event: Key) -> None:
-        """Filter out spurious escape sequences on macOS."""
-        if event.key == "escape":
-            current_time = time.time()
+        """Solution 4: Handle and filter problematic key events."""
+        current_time = time.time()
+        
+        # Check for escape sequences that are part of ANSI/mouse events
+        if event.key == 'escape':
+            self.log.info(f"Escape key detected - count: {self._escape_count + 1}, time_since_last: {current_time - self._last_escape_time:.2f}s")
             
-            # Check if this might be a spurious escape sequence
-            if current_time - self._last_escape_time < 1.0:  # Multiple escapes within 1 second
-                self._escape_count += 1
-            else:
-                self._escape_count = 1
+            # If this is likely a spurious escape (part of ANSI sequence)
+            if current_time - self._last_escape_time < 0.1:  # Less than 100ms
+                self.log.info("Filtering out spurious escape sequence")
+                event.prevent_default()
+                return
             
             self._last_escape_time = current_time
+            self._escape_count += 1
             
-            # Log the escape event for debugging
-            self.log(f"Escape key detected - count: {self._escape_count}, time_since_last: {current_time - self._last_escape_time:.2f}s")
-            
-            # If we're getting rapid escape sequences, likely spurious - ignore them
-            if self._escape_count > 1:
-                self.log("Ignoring spurious escape sequence")
+            # Only allow escape if it seems like a genuine user action
+            if self._escape_count > 3:  # Too many escapes, likely spurious
+                self.log.info("Too many escape sequences detected, filtering")
                 event.prevent_default()
                 return
         
-        # Let the event continue normally
-        super().on_key(event)
+        # Filter out ANSI escape sequences that corrupt input
+        if hasattr(event, 'character') and event.character:
+            # Check for ANSI escape sequence patterns
+            if re.match(r'[\x1b\x9b][\[\(].*[A-Za-z~]', event.character):
+                self.log.info(f"Filtering ANSI escape sequence: {repr(event.character)}")
+                event.prevent_default()
+                return
     
     def on_mount(self) -> None:
         """Start with the configuration form and setup signal handlers."""
-        # Solution 1: Setup signal handlers
-        self.setup_signal_handlers()
-        
-        # Solution 3: Add exception handling to mount
         try:
+            self.setup_signal_handlers()
             self.theme = "flexoki"
             self.push_screen(ConfigurationForm())
-            self.log("App mounted successfully - monitoring for spurious escape sequences")
+            self.log.info("App mounted successfully - monitoring for spurious escape sequences")
         except Exception as e:
-            self.log(f"Error during mount: {e}")
-            self.notify(f"Mount error: {e}", severity="error") 
+            self.log.error(f"Error during mount: {e}")
+            self.notify(f"Error starting app: {e}", severity="error") 
