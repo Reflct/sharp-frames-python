@@ -7,10 +7,12 @@ import os
 import time
 import re
 from textual.app import App
-from textual.events import Key
+from textual.events import Key, Paste
+from textual.widgets import Input
 
 from .screens import ConfigurationForm
 from .styles import SHARP_FRAMES_CSS
+from .utils import sanitize_path_input
 
 
 class SharpFramesApp(App):
@@ -86,6 +88,17 @@ class SharpFramesApp(App):
     
     def action_cancel(self) -> None:
         """Override cancel action to prevent spurious exits from ANSI sequences."""
+        # Check if we're in a screen that wants to handle its own cancellation
+        current_screen = self.screen_stack[-1] if self.screen_stack else None
+        
+        # If the current screen has its own action_cancel method, delegate to it
+        if current_screen and hasattr(current_screen, 'action_cancel') and callable(getattr(current_screen, 'action_cancel')):
+            # Only delegate to ProcessingScreen - ConfigurationForm handles its own cancellation directly
+            if 'ProcessingScreen' in str(type(current_screen)):
+                self.log.info("Delegating cancel action to ProcessingScreen")
+                current_screen.action_cancel()
+                return
+        
         current_time = time.time()
         
         # If we just had escape sequences recently, this is likely spurious
@@ -100,18 +113,18 @@ class SharpFramesApp(App):
         
         self._last_action_time = current_time
         
-        # For now, block ALL cancel actions to prevent spurious exits
-        # This is aggressive but necessary for macOS stability
-        self.log.info("Blocking cancel action to prevent spurious app exit")
-        return
-        
-        # When we want to allow legitimate cancels, uncomment this:
-        # self.log.info("Processing legitimate cancel action")
-        # self.exit("cancelled")
+        # Allow legitimate cancel actions
+        self.log.info("Processing legitimate cancel action")
+        self.exit("cancelled")
     
     def on_key(self, event: Key) -> None:
         """Solution 4: Handle and filter problematic key events."""
         current_time = time.time()
+        
+        # Allow Ctrl+C to pass through if it's legitimate
+        if event.key == 'ctrl+c':
+            self.log.info("Ctrl+C detected - allowing through for cancellation")
+            return  # Let it propagate normally
         
         # Check for escape sequences that are part of ANSI/mouse events
         if event.key == 'escape':
@@ -132,11 +145,9 @@ class SharpFramesApp(App):
                 event.stop()  # Stop event propagation completely
                 return
             
-            # For now, block ALL escape keys to prevent spurious exits
-            # This is aggressive but necessary for macOS stability
-            self.log.info("Blocking escape key to prevent spurious app exit")
-            event.stop()  # Stop event propagation completely
-            return
+            # Allow legitimate escape keys to pass through
+            self.log.info("Allowing legitimate escape key through")
+            return  # Let it propagate normally
         
         # Filter out ANSI escape sequences that corrupt input
         if hasattr(event, 'character') and event.character:
@@ -145,6 +156,144 @@ class SharpFramesApp(App):
                 self.log.info(f"Filtering ANSI escape sequence: {repr(event.character)}")
                 event.stop()  # Stop event propagation completely
                 return
+    
+    def on_paste(self, event: Paste) -> None:
+        """Handle paste events, including drag-and-drop file paths."""
+        pasted_text = event.text.strip()
+        
+        # Skip empty pastes
+        if not pasted_text:
+            return
+        
+        # Try to detect if this looks like a file path
+        if self._is_file_path(pasted_text):
+            self.log.info(f"Detected potential file path in paste: {pasted_text}")
+            
+            # Sanitize the path using our existing infrastructure
+            sanitized_path = sanitize_path_input(pasted_text)
+            
+            if sanitized_path and self._route_file_path(sanitized_path):
+                # Successfully routed to input field, prevent default paste
+                event.stop()
+                return
+        
+        # Let normal paste behavior continue for non-file content
+        self.log.info(f"Normal paste event: {pasted_text[:50]}..." if len(pasted_text) > 50 else f"Normal paste event: {pasted_text}")
+    
+    def _is_file_path(self, text: str) -> bool:
+        """Simple heuristic to detect if pasted text is likely a file path."""
+        # Skip if too long (likely not a single file path)
+        if len(text) > 500:
+            return False
+        
+        # Skip if contains multiple lines (likely not a single file path)
+        if '\n' in text or '\r' in text:
+            return False
+        
+        # Common file path patterns
+        path_patterns = [
+            r'^[A-Za-z]:[\\\/]',  # Windows drive letters
+            r'^[\\\/]',           # Unix-style absolute paths
+            r'^~[\\\/]',          # Home directory paths
+            r'^\.',               # Relative paths starting with .
+        ]
+        
+        # Check for path-like patterns
+        for pattern in path_patterns:
+            if re.match(pattern, text):
+                return True
+        
+        # Check for common file extensions
+        common_extensions = [
+            '.mp4', '.avi', '.mov', '.mkv', '.webm', '.m4v',  # Video
+            '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp',  # Images
+        ]
+        
+        text_lower = text.lower()
+        for ext in common_extensions:
+            if text_lower.endswith(ext):
+                return True
+        
+        # Check if it's an existing path
+        try:
+            # Expand user path and check existence
+            expanded_path = os.path.expanduser(text)
+            if os.path.exists(expanded_path):
+                return True
+        except (OSError, ValueError):
+            pass
+        
+        return False
+    
+    def _route_file_path(self, file_path: str) -> bool:
+        """Route detected file path to appropriate input field based on current context."""
+        try:
+            # Get current screen
+            current_screen = self.screen_stack[-1] if self.screen_stack else None
+            
+            # Only handle ConfigurationForm for now
+            if not isinstance(current_screen, ConfigurationForm):
+                self.log.info("Not on configuration screen, skipping file path routing")
+                return False
+            
+            # Determine target input based on current step
+            target_input_id = self._get_target_input_for_step(current_screen, file_path)
+            
+            if target_input_id:
+                # Find and update the target input
+                try:
+                    input_widget = current_screen.query_one(f"#{target_input_id}", Input)
+                    input_widget.value = file_path
+                    input_widget.focus()
+                    
+                    self.log.info(f"Successfully routed file path to {target_input_id}: {file_path}")
+                    return True
+                    
+                except Exception as e:
+                    self.log.warning(f"Could not find or update input {target_input_id}: {e}")
+            
+        except Exception as e:
+            self.log.error(f"Error routing file path: {e}")
+        
+        return False
+    
+    def _get_target_input_for_step(self, config_screen: ConfigurationForm, file_path: str) -> str:
+        """Determine which input field should receive the file path based on current step."""
+        current_step = config_screen.steps[config_screen.current_step]
+        
+        # Check what type of path this is
+        is_directory = os.path.isdir(file_path) if os.path.exists(file_path) else file_path.endswith(('/', '\\'))
+        is_video = any(file_path.lower().endswith(ext) for ext in ['.mp4', '.avi', '.mov', '.mkv', '.webm', '.m4v'])
+        is_image = any(file_path.lower().endswith(ext) for ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp'])
+        
+        # Import UIElementIds here to avoid circular imports
+        from .constants import UIElementIds
+        
+        # Route based on current step and file type
+        if current_step == "input_path":
+            # Input path step - route based on file type and current input type selection
+            input_type = config_screen.config_data.get("input_type")
+            if input_type == "video" and (is_video or is_directory):
+                return UIElementIds.INPUT_PATH_FIELD
+            elif input_type == "video_directory" and is_directory:
+                return UIElementIds.INPUT_PATH_FIELD
+            elif input_type == "image_directory" and is_directory:
+                return UIElementIds.INPUT_PATH_FIELD
+            elif not input_type:  # No input type selected yet, accept any
+                return UIElementIds.INPUT_PATH_FIELD
+        
+        elif current_step == "output_dir":
+            # Output directory step - only accept directories
+            if is_directory or not os.path.exists(file_path):  # Accept non-existent paths as potential output dirs
+                return UIElementIds.OUTPUT_DIR_FIELD
+        
+        # For other steps, be more conservative
+        elif current_step == "input_type":
+            # If on input type selection, accept file paths to help determine type
+            return UIElementIds.INPUT_PATH_FIELD if any([is_video, is_image, is_directory]) else None
+        
+        self.log.info(f"No appropriate input found for step {current_step}, file type: directory={is_directory}, video={is_video}, image={is_image}")
+        return None
     
     def on_mount(self) -> None:
         """Start with the configuration form and setup signal handlers."""

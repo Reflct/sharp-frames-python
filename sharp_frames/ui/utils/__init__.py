@@ -9,10 +9,13 @@ from .context_managers import (
 )
 
 from .error_analysis import ErrorContext
+from .path_sanitizer import PathSanitizer, sanitize_path_input
 
 __all__ = [
     "managed_subprocess",
     "managed_temp_directory", 
     "managed_thread_pool",
-    "ErrorContext"
+    "ErrorContext",
+    "PathSanitizer",
+    "sanitize_path_input"
 ] 

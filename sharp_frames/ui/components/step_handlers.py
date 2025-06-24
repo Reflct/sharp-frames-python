@@ -18,6 +18,7 @@ from .validators import (
     ImageDirectoryValidator,
     OutputDirectoryValidator
 )
+from ..utils.path_sanitizer import PathSanitizer
 
 
 class BaseStepHandler:
@@ -107,7 +108,14 @@ class InputPathStepHandler(BaseStepHandler):
             validators=[validator]
         )
         container.mount(input_widget)
+        
+        # Add helpful text about automatic cleaning
+        helper_label = Label("Quotes will be automatically removed", classes="hint")
+        container.mount(helper_label)
+        
         input_widget.focus()
+    
+
 
 
 class OutputDirStepHandler(BaseStepHandler):
@@ -123,7 +131,14 @@ class OutputDirStepHandler(BaseStepHandler):
             validators=[OutputDirectoryValidator(create_if_missing=True)]
         )
         container.mount(input_widget)
+        
+        # Add helpful text about automatic cleaning
+        helper_label = Label("Quotes will be automatically removed", classes="hint")
+        container.mount(helper_label)
+        
         input_widget.focus()
+    
+
 
 
 class FpsStepHandler(BaseStepHandler):
