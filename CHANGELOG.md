@@ -5,6 +5,28 @@ All notable changes to the Sharp Frames project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.4] - 2025-01-21
+
+### Added
+- **Smart Path Sanitization**: Automatically removes quotes, shell command prefixes, and escape sequences from pasted file paths
+- **Intelligent File Path Routing**: Drag-and-drop and file paths are automatically routed to appropriate input fields based on context
+- **Enhanced Input Validation**: Visual feedback for valid/invalid inputs with helpful hints
+- **Improved User Experience**: Seamless path handling eliminates common user frustrations
+
+### Changed
+- **Path Input UX**: File path inputs now automatically clean user input for better usability
+- **Input Field Validation**: Enhanced validators with automatic path sanitization
+- **Visual Feedback**: Added helpful text indicating automatic quote removal
+
+### Fixed
+- **Processing Error Handling**: Improved error messages and user feedback in processing screen
+- **Configuration Validation**: Better handling of path validation edge cases
+
+### Technical
+- **New PathSanitizer Utility**: Comprehensive path cleaning with extensive test coverage (366+ test cases)
+- **Enhanced Validators**: All path validators now support automatic sanitization
+- **Smart File Type Detection**: Context-aware routing based on file extensions and current step
+
 ## [0.2.3] - 2025-01-21
 
 ### Fixed

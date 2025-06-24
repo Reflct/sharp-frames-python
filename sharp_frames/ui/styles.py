@@ -107,4 +107,13 @@ Checkbox {
 Label {
     margin: 0;
 }
+
+/* Input field enhancements */
+Input.-valid {
+    border: solid $success;
+}
+
+Input.-invalid {
+    border: solid $error;
+}
 """ 

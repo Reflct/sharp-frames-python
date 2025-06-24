@@ -107,7 +107,9 @@ class ProcessingScreen(Screen):
             
             if not self._validate_config(self.config):
                 logger.error("Configuration validation failed")
-                self._handle_error("Configuration validation failed. Please check your settings.")
+                status_text.update("❌ Configuration validation failed")
+                phase_text.update("Please check your settings and try again.")
+                self.query_one("#cancel-processing").label = "Close"
                 return
             
             logger.info("Configuration validation passed")

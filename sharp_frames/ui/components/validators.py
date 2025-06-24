@@ -8,6 +8,7 @@ from pathlib import Path
 
 from textual.widgets import Input
 from textual.validation import ValidationResult, Validator
+from ..utils.path_sanitizer import PathSanitizer
 
 
 class PathValidator(Validator):
@@ -23,7 +24,17 @@ class PathValidator(Validator):
         if not value.strip():
             return self.failure("Path cannot be empty")
         
-        path = Path(os.path.expanduser(value.strip()))
+        # Sanitize the path input
+        sanitized_path, changes = PathSanitizer.sanitize(value)
+        
+        # Store sanitized path for retrieval
+        self._last_sanitized = sanitized_path
+        self._last_changes = changes
+        
+        if not sanitized_path:
+            return self.failure("Path cannot be empty")
+        
+        path = Path(os.path.expanduser(sanitized_path))
         
         if self.must_exist:
             if not path.exists():
@@ -36,6 +47,14 @@ class PathValidator(Validator):
                 return self.failure("Path must be a directory")
         
         return self.success()
+    
+    def get_sanitized_value(self) -> str:
+        """Get the last sanitized path value."""
+        return getattr(self, '_last_sanitized', '')
+    
+    def get_sanitization_changes(self) -> list:
+        """Get the list of changes made during sanitization."""
+        return getattr(self, '_last_changes', [])
 
 
 class VideoFileValidator(Validator):
@@ -55,7 +74,17 @@ class VideoFileValidator(Validator):
         if not value.strip():
             return self.failure("Please enter a video file path (e.g., /path/to/video.mp4)")
         
-        path = Path(os.path.expanduser(value.strip()))
+        # Sanitize the path input
+        sanitized_path, changes = PathSanitizer.sanitize(value)
+        
+        # Store sanitized path for retrieval
+        self._last_sanitized = sanitized_path
+        self._last_changes = changes
+        
+        if not sanitized_path:
+            return self.failure("Please enter a video file path (e.g., /path/to/video.mp4)")
+        
+        path = Path(os.path.expanduser(sanitized_path))
         
         # Check file extension first (even if file doesn't exist yet)
         if path.suffix.lower() not in self.SUPPORTED_VIDEO_EXTENSIONS:
@@ -80,6 +109,14 @@ class VideoFileValidator(Validator):
                 return self.failure("Cannot access video file - check permissions")
         
         return self.success()
+    
+    def get_sanitized_value(self) -> str:
+        """Get the last sanitized path value."""
+        return getattr(self, '_last_sanitized', '')
+    
+    def get_sanitization_changes(self) -> list:
+        """Get the list of changes made during sanitization."""
+        return getattr(self, '_last_changes', [])
 
 
 class VideoDirectoryValidator(Validator):
@@ -94,7 +131,17 @@ class VideoDirectoryValidator(Validator):
         if not value.strip():
             return self.failure("Please enter a directory path containing video files")
         
-        path = Path(os.path.expanduser(value.strip()))
+        # Sanitize the path input
+        sanitized_path, changes = PathSanitizer.sanitize(value)
+        
+        # Store sanitized path for retrieval
+        self._last_sanitized = sanitized_path
+        self._last_changes = changes
+        
+        if not sanitized_path:
+            return self.failure("Please enter a directory path containing video files")
+        
+        path = Path(os.path.expanduser(sanitized_path))
         
         if self.must_exist:
             if not path.exists():
@@ -130,6 +177,14 @@ class VideoDirectoryValidator(Validator):
             pass
         
         return video_files
+    
+    def get_sanitized_value(self) -> str:
+        """Get the last sanitized path value."""
+        return getattr(self, '_last_sanitized', '')
+    
+    def get_sanitization_changes(self) -> list:
+        """Get the list of changes made during sanitization."""
+        return getattr(self, '_last_changes', [])
 
 
 class ImageDirectoryValidator(Validator):
@@ -150,7 +205,17 @@ class ImageDirectoryValidator(Validator):
         if not value.strip():
             return self.failure("Please enter a directory path containing image files")
         
-        path = Path(os.path.expanduser(value.strip()))
+        # Sanitize the path input
+        sanitized_path, changes = PathSanitizer.sanitize(value)
+        
+        # Store sanitized path for retrieval
+        self._last_sanitized = sanitized_path
+        self._last_changes = changes
+        
+        if not sanitized_path:
+            return self.failure("Please enter a directory path containing image files")
+        
+        path = Path(os.path.expanduser(sanitized_path))
         
         if self.must_exist:
             if not path.exists():
@@ -186,6 +251,14 @@ class ImageDirectoryValidator(Validator):
             pass
         
         return image_files
+    
+    def get_sanitized_value(self) -> str:
+        """Get the last sanitized path value."""
+        return getattr(self, '_last_sanitized', '')
+    
+    def get_sanitization_changes(self) -> list:
+        """Get the list of changes made during sanitization."""
+        return getattr(self, '_last_changes', [])
 
 
 class OutputDirectoryValidator(Validator):
@@ -199,7 +272,17 @@ class OutputDirectoryValidator(Validator):
         if not value.strip():
             return self.failure("Please enter an output directory path")
         
-        path = Path(os.path.expanduser(value.strip()))
+        # Sanitize the path input
+        sanitized_path, changes = PathSanitizer.sanitize(value)
+        
+        # Store sanitized path for retrieval
+        self._last_sanitized = sanitized_path
+        self._last_changes = changes
+        
+        if not sanitized_path:
+            return self.failure("Please enter an output directory path")
+        
+        path = Path(os.path.expanduser(sanitized_path))
         
         # Check if path exists
         if path.exists():
@@ -236,6 +319,14 @@ class OutputDirectoryValidator(Validator):
                 return self.failure("Output directory does not exist")
         
         return self.success()
+    
+    def get_sanitized_value(self) -> str:
+        """Get the last sanitized path value."""
+        return getattr(self, '_last_sanitized', '')
+    
+    def get_sanitization_changes(self) -> list:
+        """Get the list of changes made during sanitization."""
+        return getattr(self, '_last_changes', [])
 
 
 class IntRangeValidator(Validator):

@@ -283,7 +283,16 @@ class ConfigurationForm(Screen):
                 self._show_error(container, "Please enter a valid input path")
                 return False
             
-            self.config_data["input_path"] = input_widget.value.strip()
+            # Use sanitized path from validator if available
+            path_value = input_widget.value.strip()
+            if input_widget.validators:
+                validator = input_widget.validators[0]
+                if hasattr(validator, 'get_sanitized_value'):
+                    sanitized_path = validator.get_sanitized_value()
+                    if sanitized_path:
+                        path_value = sanitized_path
+            
+            self.config_data["input_path"] = path_value
             return True
         except Exception as e:
             self._show_error(container, f"Error validating input path: {str(e)}")
@@ -302,7 +311,16 @@ class ConfigurationForm(Screen):
                 self._show_error(container, "Please enter a valid output directory")
                 return False
             
-            self.config_data["output_dir"] = input_widget.value.strip()
+            # Use sanitized path from validator if available
+            path_value = input_widget.value.strip()
+            if input_widget.validators:
+                validator = input_widget.validators[0]
+                if hasattr(validator, 'get_sanitized_value'):
+                    sanitized_path = validator.get_sanitized_value()
+                    if sanitized_path:
+                        path_value = sanitized_path
+            
+            self.config_data["output_dir"] = path_value
             return True
         except Exception as e:
             self._show_error(container, f"Error validating output directory: {str(e)}")
@@ -442,13 +460,8 @@ class ConfigurationForm(Screen):
     
     def action_cancel(self) -> None:
         """Cancel the configuration and exit."""
-        # Use the app's cancel action instead of direct exit
-        # This allows the app to filter spurious cancel actions
-        if hasattr(self.app, 'action_cancel'):
-            self.app.action_cancel()
-        else:
-            # Fallback if app doesn't have custom cancel handling
-            self.app.exit("cancelled")
+        # Exit directly to avoid circular call with app's action_cancel
+        self.app.exit("cancelled")
     
     def action_help(self) -> None:
         """Show help information."""
