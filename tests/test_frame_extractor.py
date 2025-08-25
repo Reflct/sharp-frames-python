@@ -220,7 +220,7 @@ class TestFrameExtractor:
         assert frame_data.index == 5
         assert frame_data.sharpness_score == 125.5
         assert frame_data.source_video is None
-        assert frame_data.output_name == "000006"  # index + 1, zero-padded
+        assert frame_data.output_name == "00006"  # index + 1, zero-padded to 5 digits
     
     def test_create_frame_data_with_video_attribution(self):
         """Test frame data creation with video directory attribution."""
@@ -234,7 +234,7 @@ class TestFrameExtractor:
         assert frame_data.sharpness_score == 150.0
         assert frame_data.source_video == "video_001"
         assert frame_data.source_index == 5
-        assert frame_data.output_name == "video01_00026"  # index + 1
+        assert frame_data.output_name == "video01_00006"  # source_index + 1, zero-padded
     
     def test_temp_directory_management(self):
         """Test temporary directory creation and tracking."""

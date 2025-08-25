@@ -180,14 +180,23 @@ class TwoPhaseProcessingScreen(Screen):
             
             logger.info("Starting extraction and analysis...")
             
-            # Update progress
-            self.app.call_from_thread(
-                self._update_progress_ui, 
-                "extraction", 0, 100, 10, "Starting frame extraction..."
-            )
+            # Create progress callback
+            def progress_callback(phase, current, total, description):
+                """Progress callback for TUIProcessor."""
+                # Calculate overall progress percentage
+                if total > 0:
+                    progress_pct = (current / total) * 100
+                else:
+                    progress_pct = 0
+                
+                # Update UI from thread
+                self.app.call_from_thread(
+                    self._update_progress_ui,
+                    phase, current, total, progress_pct, description
+                )
             
-            # Run Phase 1: extract and analyze
-            self.extraction_result = self.processor.extract_and_analyze(self.config)
+            # Run Phase 1: extract and analyze with progress callback
+            self.extraction_result = self.processor.extract_and_analyze(self.config, progress_callback)
             
             if not self.extraction_result or not self.extraction_result.frames:
                 logger.error("Phase 1 completed but no frames were extracted")
@@ -407,4 +416,3 @@ class TwoPhaseProcessingScreen(Screen):
             except Exception as e:
                 logger.warning(f"Error cleaning up processor: {e}")
         
-        super().on_unmount()

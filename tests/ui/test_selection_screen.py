@@ -11,7 +11,7 @@ from sharp_frames.ui.screens.selection import SelectionScreen
 from sharp_frames.models.frame_data import ExtractionResult, FrameData
 from sharp_frames.processing.tui_processor import TUIProcessor
 from tests.fixtures import (
-    sample_frames_data,
+    create_sample_frames_data,
     sample_config_video,
     mock_extraction_result
 )
@@ -34,7 +34,7 @@ class TestSelectionScreen:
         
         # Create sample extraction result
         self.sample_result = ExtractionResult(
-            frames=sample_frames_data()[:20],  # Use first 20 frames for testing
+            frames=create_sample_frames_data()[:20],  # Use first 20 frames for testing
             metadata={'fps': 30, 'duration': 10.0},
             input_type='video',
             temp_dir='/tmp/test'

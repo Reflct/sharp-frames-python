@@ -19,16 +19,17 @@ class TUIProcessor:
         """Initialize TUIProcessor with all required components."""
         self.extractor = FrameExtractor()
         self.analyzer = SharpnessAnalyzer()
-        self.selector = FrameSelector()
-        self.saver = FrameSaver()
+        self.selector = FrameSelector(show_progress=False)  # Disable progress bars for thread safety
+        self.saver = FrameSaver(show_progress=False)  # Disable progress bars for thread safety
         self.current_result: Optional[ExtractionResult] = None
     
-    def extract_and_analyze(self, config: Dict[str, Any]) -> ExtractionResult:
+    def extract_and_analyze(self, config: Dict[str, Any], progress_callback=None) -> ExtractionResult:
         """
         Phase 1: Extract and analyze frames.
         
         Args:
             config: Configuration dictionary containing input settings
+            progress_callback: Optional callback for progress updates (phase, current, total, description)
             
         Returns:
             ExtractionResult with frames and sharpness scores
@@ -39,9 +40,13 @@ class TUIProcessor:
         try:
             print(f"Phase 1: Extracting and analyzing frames from {config['input_type']}...")
             
+            # Report extraction starting
+            if progress_callback:
+                progress_callback("extraction", 0, 100, "Starting frame extraction...")
+            
             # Extract frames
             print("Extracting frames...")
-            extraction_result = self.extractor.extract_frames(config)
+            extraction_result = self.extractor.extract_frames(config, progress_callback)
             
             if not extraction_result.frames:
                 print("No frames were extracted.")
@@ -50,9 +55,13 @@ class TUIProcessor:
             
             print(f"Extracted {len(extraction_result.frames)} frames")
             
+            # Report analysis starting
+            if progress_callback:
+                progress_callback("analysis", 0, len(extraction_result.frames), "Starting sharpness analysis...")
+            
             # Calculate sharpness scores
             print("Analyzing frame sharpness...")
-            analyzed_result = self.analyzer.calculate_sharpness(extraction_result)
+            analyzed_result = self.analyzer.calculate_sharpness(extraction_result, progress_callback)
             
             print(f"Analysis complete. Average sharpness: {analyzed_result.average_sharpness:.2f}")
             print(f"Sharpness range: {analyzed_result.sharpness_range[0]:.2f} - {analyzed_result.sharpness_range[1]:.2f}")
@@ -102,16 +111,36 @@ class TUIProcessor:
         Raises:
             RuntimeError: If no extraction result is available
         """
+        with open("debug_save.log", "a") as f:
+            f.write(f"TUIProcessor.complete_selection called\n")
+            f.write(f"  method: {method}\n")
+            f.write(f"  config: {config}\n")
+            f.write(f"  params: {params}\n")
+            f.write(f"  has current_result: {self.current_result is not None}\n")
+            if self.current_result:
+                f.write(f"  current_result.frames count: {len(self.current_result.frames)}\n")
+        
         if not self.current_result:
+            with open("debug_save.log", "a") as f:
+                f.write("ERROR: No extraction result available\n")
             raise RuntimeError("No extraction result available. Run extract_and_analyze() first.")
         
         try:
+            with open("debug_save.log", "a") as f:
+                f.write(f"Phase 2: Selecting and saving frames using {method} method...\n")
             print(f"Phase 2: Selecting and saving frames using {method} method...")
             
             # Select frames
+            with open("debug_save.log", "a") as f:
+                f.write("Calling FrameSelector.select_frames...\n")
             selected_frames = self.selector.select_frames(self.current_result.frames, method, **params)
             
+            with open("debug_save.log", "a") as f:
+                f.write(f"FrameSelector returned {len(selected_frames) if selected_frames else 0} frames\n")
+            
             if not selected_frames:
+                with open("debug_save.log", "a") as f:
+                    f.write("ERROR: No frames were selected based on the criteria\n")
                 print("No frames were selected based on the criteria.")
                 return False
             
@@ -122,8 +151,15 @@ class TUIProcessor:
             selection_config['selection_method'] = method
             selection_config.update(params)
             
+            with open("debug_save.log", "a") as f:
+                f.write(f"Final selection_config: {selection_config}\n")
+                f.write("Calling FrameSaver.save_frames...\n")
+            
             # Save frames
             success = self.saver.save_frames(selected_frames, selection_config)
+            
+            with open("debug_save.log", "a") as f:
+                f.write(f"FrameSaver.save_frames returned: {success}\n")
             
             if success:
                 print("Selection and saving completed successfully.")
@@ -135,6 +171,11 @@ class TUIProcessor:
             return success
             
         except Exception as e:
+            with open("debug_save.log", "a") as f:
+                f.write(f"EXCEPTION in TUIProcessor.complete_selection: {e}\n")
+                f.write(f"Exception type: {type(e).__name__}\n")
+                import traceback
+                f.write(f"Traceback:\n{traceback.format_exc()}\n")
             print(f"Error during selection and saving: {e}")
             return False
     
@@ -257,20 +298,22 @@ class TUIProcessor:
                 return False, f"Cannot select {n} frames from {total_frames} available frames"
         
         elif method == 'batched':
-            batch_count = params.get('batch_count', 5)
-            if not isinstance(batch_count, int) or batch_count <= 0:
-                return False, "Parameter 'batch_count' must be a positive integer"
-            if batch_count > total_frames:
-                return False, f"Cannot create {batch_count} batches from {total_frames} available frames"
+            batch_size = params.get('batch_size', 5)
+            if not isinstance(batch_size, int) or batch_size <= 0:
+                return False, "Parameter 'batch_size' must be a positive integer"
+            
+            batch_buffer = params.get('batch_buffer', 2)
+            if not isinstance(batch_buffer, int) or batch_buffer < 0:
+                return False, "Parameter 'batch_buffer' must be a non-negative integer"
         
         elif method == 'outlier_removal':
-            factor = params.get('factor', 1.5)
-            if not isinstance(factor, (int, float)) or factor <= 0:
-                return False, "Parameter 'factor' must be a positive number"
+            outlier_sensitivity = params.get('outlier_sensitivity', 50)
+            if not isinstance(outlier_sensitivity, int) or not (0 <= outlier_sensitivity <= 100):
+                return False, "Parameter 'outlier_sensitivity' must be an integer between 0 and 100"
             
-            window_size = params.get('window_size', 15)
-            if not isinstance(window_size, int) or window_size <= 0:
-                return False, "Parameter 'window_size' must be a positive integer"
+            outlier_window_size = params.get('outlier_window_size', 15)
+            if not isinstance(outlier_window_size, int) or outlier_window_size <= 0:
+                return False, "Parameter 'outlier_window_size' must be a positive integer"
         
         else:
             return False, f"Unknown selection method: {method}"

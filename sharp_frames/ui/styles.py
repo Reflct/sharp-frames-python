@@ -293,4 +293,85 @@ Input.-invalid {
     color: $error;
     text-style: bold;
 }
+
+/* New Selection Screen Styles - Clean Layout without Preview */
+#main_content {
+    padding: 1;
+    height: auto;
+}
+
+.main_title {
+    text-align: center;
+    text-style: bold;
+    color: $primary;
+    margin: 0 0 1 0;
+    height: 1;
+}
+
+.subtitle {
+    text-align: center;
+    color: $text-muted;
+    margin: 0 0 1 0;
+    height: 1;
+}
+
+
+/* Controls section takes remaining space */
+.controls {
+    margin: 1 0 2 0;
+    height: auto;
+}
+
+.control_group {
+    width: 1fr;
+    padding: 1;
+    border: solid $surface;
+    margin: 0 1;
+    height: auto;
+    min-height: 12;
+}
+
+.control_label {
+    text-style: bold;
+    color: $primary;
+    margin: 0 0 1 0;
+    height: 1;
+}
+
+.description {
+    color: $text-muted;
+    text-style: italic;
+    margin: 1 0 0 0;
+    height: auto;
+}
+
+.parameter_inputs {
+    margin: 1 0 0 0;
+    height: auto;
+    min-height: 6;
+}
+
+.param_label {
+    margin: 1 0 0 0;
+    color: $text;
+    height: 1;
+}
+
+.param_input {
+    margin: 0 0 1 0;
+    height: 3;
+    width: 100%;
+}
+
+/* Action buttons inside main content */
+.action_buttons {
+    align: center middle;
+    margin: 2 0 1 0;
+    height: 3;
+}
+
+.action_buttons Button {
+    margin: 0 2;
+    min-width: 15;
+}
 """ 

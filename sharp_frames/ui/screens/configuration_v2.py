@@ -24,9 +24,9 @@ from ..components.v2_step_handlers import (
     OutputFormatStepHandler,
     WidthStepHandler,
     ForceOverwriteStepHandler,
-    ConfirmStepHandler,
-    ValidationHelpers
+    ConfirmStepHandler
 )
+from ..components.validators import ValidationHelpers
 
 
 class TwoPhaseConfigurationForm(Screen):
@@ -77,209 +77,217 @@ class TwoPhaseConfigurationForm(Screen):
         self.validation_helpers = ValidationHelpers()
     
     def compose(self) -> ComposeResult:
-        """Create the configuration layout."""
+        """Create the wizard layout - same style as legacy."""
         yield Header()
+        ascii_title = """
+███████[#2575E6]╗[/#2575E6]██[#2575E6]╗[/#2575E6]  ██[#2575E6]╗[/#2575E6] █████[#2575E6]╗[/#2575E6] ██████[#2575E6]╗[/#2575E6] ██████[#2575E6]╗[/#2575E6]     ███████[#2575E6]╗[/#2575E6]██████[#2575E6]╗[/#2575E6]  █████[#2575E6]╗[/#2575E6] ███[#2575E6]╗[/#2575E6]   ███[#2575E6]╗[/#2575E6]███████[#2575E6]╗[/#2575E6]███████[#2575E6]╗[/#2575E6]
+██[#2575E6]╔[/#2575E6][#2575E6]════╝[/#2575E6]██[#2575E6]║[/#2575E6]  ██[#2575E6]║[/#2575E6]██[#2575E6]╔══[/#2575E6]██[#2575E6]╗[/#2575E6]██[#2575E6]╔══[/#2575E6]██[#2575E6]╗[/#2575E6]██[#2575E6]╔══[/#2575E6]██[#2575E6]╗[/#2575E6]    ██[#2575E6]╔[/#2575E6][#2575E6]════╝[/#2575E6]██[#2575E6]╔══[/#2575E6]██[#2575E6]╗[/#2575E6]██[#2575E6]╔══[/#2575E6]██[#2575E6]╗[/#2575E6]████[#2575E6]╗[/#2575E6] ████[#2575E6]║[/#2575E6]██[#2575E6]╔[/#2575E6][#2575E6]════╝[/#2575E6]██[#2575E6]╔[/#2575E6][#2575E6]════╝[/#2575E6]
+███████[#2575E6]╗[/#2575E6]███████[#2575E6]║[/#2575E6]███████[#2575E6]║[/#2575E6]██████[#2575E6]╔╝[/#2575E6]██████[#2575E6]╔╝[/#2575E6]    █████[#2575E6]╗[/#2575E6]  ██████[#2575E6]╔╝[/#2575E6]███████[#2575E6]║[/#2575E6]██[#2575E6]╔[/#2575E6]████[#2575E6]╔[/#2575E6]██[#2575E6]║[/#2575E6]█████[#2575E6]╗[/#2575E6]  ███████[#2575E6]╗[/#2575E6]
+[#2575E6]╚[/#2575E6][#2575E6]════[/#2575E6]██[#2575E6]║[/#2575E6]██[#2575E6]╔══[/#2575E6]██[#2575E6]║[/#2575E6]██[#2575E6]╔══[/#2575E6]██[#2575E6]║[/#2575E6]██[#2575E6]╔══[/#2575E6]██[#2575E6]╗[/#2575E6]██[#2575E6]╔═══╝[/#2575E6]     ██[#2575E6]╔══╝[/#2575E6]  ██[#2575E6]╔══[/#2575E6]██[#2575E6]╗[/#2575E6]██[#2575E6]╔══[/#2575E6]██[#2575E6]║[/#2575E6]██[#2575E6]║╚[/#2575E6]██[#2575E6]╔╝[/#2575E6]██[#2575E6]║[/#2575E6]██[#2575E6]╔══╝[/#2575E6]  [#2575E6]╚[/#2575E6][#2575E6]════[/#2575E6]██[#2575E6]║[/#2575E6]
+███████[#2575E6]║[/#2575E6]██[#2575E6]║[/#2575E6]  ██[#2575E6]║[/#2575E6]██[#2575E6]║[/#2575E6]  ██[#2575E6]║[/#2575E6]██[#2575E6]║[/#2575E6]  ██[#2575E6]║[/#2575E6]██[#2575E6]║[/#2575E6]         ██[#2575E6]║[/#2575E6]     ██[#2575E6]║[/#2575E6]  ██[#2575E6]║[/#2575E6]██[#2575E6]║[/#2575E6]  ██[#2575E6]║[/#2575E6]██[#2575E6]║[/#2575E6] [#2575E6]╚═╝[/#2575E6] ██[#2575E6]║[/#2575E6]███████[#2575E6]╗[/#2575E6]███████[#2575E6]║[/#2575E6]
+[#2575E6]╚══════╝╚═╝[/#2575E6]  [#2575E6]╚═╝╚═╝[/#2575E6]  [#2575E6]╚═╝╚═╝[/#2575E6]  [#2575E6]╚═╝╚═╝[/#2575E6]         [#2575E6]╚═╝[/#2575E6]     [#2575E6]╚═╝[/#2575E6]  [#2575E6]╚═╝╚═╝[/#2575E6]  [#2575E6]╚═╝╚═╝[/#2575E6]     [#2575E6]╚═╝╚══════╝╚══════╝[/#2575E6]
+        """
+        yield Static(ascii_title, classes="title")
+        yield Static("Two-Phase Mode - Interactive Selection", classes="subtitle")
+        yield Static("", id="step-info", classes="step-info")
         
-        with Container(id="configuration-container"):
-            yield Static("Sharp Frames Configuration", classes="title")
-            yield Static("", id="step-title", classes="step-title")
-            yield Static("", id="step-description", classes="step-description")
-            
-            # Dynamic content container for step-specific widgets
-            with Container(id="step-content"):
-                pass
-            
-            # Navigation buttons
-            with Horizontal(id="navigation-buttons", classes="button-row"):
-                yield Button("← Back", id="back-button", variant="default")
-                yield Button("Next →", id="next-button", variant="primary")
-                yield Button("Cancel", id="cancel-button", variant="error")
+        with Container(id="main-container"):
+            yield Container(id="step-container")
+        
+        with Horizontal(classes="buttons"):
+            yield Button("Back", variant="default", id="back-btn", disabled=True)
+            yield Button("Next", variant="primary", id="next-btn")
+            yield Button("Cancel", variant="default", id="cancel-btn")
         
         yield Footer()
     
     def on_mount(self) -> None:
-        """Initialize the form when mounted."""
-        self._render_current_step()
-        self._update_navigation_buttons()
+        """Set up the wizard when mounted."""
+        self.show_current_step()
+    
+    def reset_to_first_step(self) -> None:
+        """Reset the configuration form to the first step."""
+        self.current_step = 0
+        self.config_data = {}  # Clear previous configuration
+        self.show_current_step()
     
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        """Handle button presses."""
-        if event.button.id == "next-button":
-            self._handle_next()
-        elif event.button.id == "back-button":
-            self._handle_back()
-        elif event.button.id == "cancel-button":
+        """Handle button press events - same pattern as legacy."""
+        if event.button.id == UIElementIds.NEXT_BTN:
+            self._next_step()
+        elif event.button.id == UIElementIds.BACK_BTN:
+            self._back_step()
+        elif event.button.id == UIElementIds.CANCEL_BTN:
             self.action_cancel()
     
-    def _handle_next(self) -> None:
-        """Handle next button press."""
-        current_step_name = self.steps[self.current_step]
-        handler = self.step_handlers[current_step_name]
+    def show_current_step(self) -> None:
+        """Display the current step of the wizard - same pattern as legacy."""
+        step_container = self.query_one("#step-container")
+        # Clear all children from the container using legacy pattern
+        for child in list(step_container.children):
+            child.remove()
         
-        # Validate current step
-        if not handler.validate(self):
+        step = self.steps[self.current_step]
+        visible_steps = [s for s in self.steps if self._should_show_step(s)]
+        step_number = visible_steps.index(step) + 1 if step in visible_steps else 1
+        total_visible = len(visible_steps)
+        
+        # Update step info - same format as legacy
+        step_info = self.query_one("#step-info")
+        step_title = self.step_handlers[step].get_title()
+        step_description = self.step_handlers[step].get_description()
+        step_info.update(f"Step {step_number} of {total_visible}: {step_title}\n{step_description}")
+        
+        # Update navigation buttons - same logic as legacy
+        back_btn = self.query_one("#back-btn")
+        next_btn = self.query_one("#next-btn")
+        
+        back_btn.disabled = (self.current_step == 0)
+        
+        if step == "confirm":
+            next_btn.label = "Start Processing"
+            next_btn.variant = "success"
+        else:
+            next_btn.label = "Next"
+            next_btn.variant = "primary"
+        
+        # Render step content using handler
+        if step in self.step_handlers:
+            self.step_handlers[step].render(self, step_container)
+        else:
+            # Fallback for unknown steps
+            step_container.mount(Label(f"Unknown step: {step}", classes="error-message"))
+    
+    def _should_show_step(self, step: str) -> bool:
+        """Check if a step should be shown based on current configuration - same as legacy."""
+        if step == "fps":
+            return self.config_data.get("input_type") in [InputTypes.VIDEO, InputTypes.VIDEO_DIRECTORY]
+        return True
+    
+    def _next_step(self) -> None:
+        """Move to the next step if current step is valid - same logic as legacy."""
+        # Save current step data
+        if not self._save_current_step():
             return  # Validation failed, stay on current step
         
-        # Save step data
-        step_data = handler.get_data(self)
-        self.config_data.update(step_data)
+        # Skip steps that shouldn't be shown
+        next_step = self.current_step + 1
+        while next_step < len(self.steps) and not self._should_show_step(self.steps[next_step]):
+            next_step += 1
         
-        if current_step_name == "confirm":
-            # Final step - start processing
-            self._start_processing()
+        if next_step < len(self.steps):
+            self.current_step = next_step
+            self.show_current_step()
         else:
-            # Move to next step
-            self.current_step += 1
-            self._render_current_step()
-            self._update_navigation_buttons()
+            # Last step - process the configuration (go to processing screen)
+            self.action_process()
     
-    def _handle_back(self) -> None:
-        """Handle back button press."""
-        if self.current_step > 0:
-            self.current_step -= 1
-            self._render_current_step()
-            self._update_navigation_buttons()
+    def _back_step(self) -> None:
+        """Move to the previous step - same logic as legacy."""
+        # Skip steps that shouldn't be shown
+        prev_step = self.current_step - 1
+        while prev_step >= 0 and not self._should_show_step(self.steps[prev_step]):
+            prev_step -= 1
+        
+        if prev_step >= 0:
+            self.current_step = prev_step
+            self.show_current_step()
     
-    def _render_current_step(self) -> None:
-        """Render the current configuration step."""
-        step_name = self.steps[self.current_step]
-        handler = self.step_handlers[step_name]
+    def _save_current_step(self) -> bool:
+        """Save the current step data and validate - same pattern as legacy."""
+        step = self.steps[self.current_step]
+        handler = self.step_handlers.get(step)
         
-        # Update step title and description
-        self.query_one("#step-title").update(handler.get_title())
-        self.query_one("#step-description").update(handler.get_description())
+        if not handler:
+            return True
         
-        # Clear and populate step content
-        step_content = self.query_one("#step-content")
-        step_content.remove_children()
-        
-        # Let handler create its widgets
-        handler.render(self, step_content)
-        
-        # Pre-populate with existing data if available
-        if step_name in self.config_data:
-            handler.set_data(self, self.config_data[step_name])
+        try:
+            self._clear_error()
+            
+            # Validate step
+            if not handler.validate(self):
+                return False
+            
+            # Get data from step
+            step_data = handler.get_data(self)
+            self.config_data.update(step_data)
+            
+            return True
+            
+        except Exception as e:
+            self._show_error(f"Error: {str(e)}")
+            return False
     
-    def _update_navigation_buttons(self) -> None:
-        """Update navigation button states."""
-        back_button = self.query_one("#back-button")
-        next_button = self.query_one("#next-button")
-        
-        # Back button
-        back_button.disabled = (self.current_step == 0)
-        
-        # Next button label
-        if self.current_step == len(self.steps) - 1:  # Last step
-            next_button.label = "Start Processing"
-        else:
-            next_button.label = "Next →"
-        
-        # Step visibility logic for FPS step
-        if self.steps[self.current_step] == "fps":
-            # Only show FPS step for video inputs
-            input_type = self.config_data.get("input_type")
-            if input_type not in ["video", "video_directory"]:
-                # Skip FPS step for non-video inputs
-                if self.current_step < len(self.steps) - 1:
-                    self.current_step += 1
-                    self._render_current_step()
-                    self._update_navigation_buttons()
-                    return
+    def _clear_error(self) -> None:
+        """Clear any error messages - same as legacy."""
+        try:
+            error_widget = self.query_one(".error-message")
+            error_widget.remove()
+        except:
+            pass  # No error message to remove
     
-    def _start_processing(self) -> None:
-        """Start the processing with collected configuration."""
+    def _show_error(self, message: str) -> None:
+        """Show error message - same as legacy."""
+        try:
+            step_container = self.query_one("#step-container")
+            error_label = Label(message, classes="error-message")
+            step_container.mount(error_label)
+        except Exception as e:
+            print(f"Failed to show error message: {e}")
+    
+    def action_cancel(self) -> None:
+        """Cancel the configuration and exit - same as legacy."""
+        self.app.pop_screen()
+    
+    def action_process(self) -> None:
+        """Start processing with the collected configuration - transition to processing_v2."""
         # Import here to avoid circular imports
         from .processing_v2 import TwoPhaseProcessingScreen
         
-        try:
-            # Validate final configuration
-            if not self._validate_final_config():
-                return
-            
-            # Create and push processing screen
-            processing_screen = TwoPhaseProcessingScreen(self.config_data)
-            self.app.push_screen(processing_screen)
-            
-        except Exception as e:
-            self.app.log.error(f"Error starting processing: {e}")
-            # Show error message to user
-            self.query_one("#step-description").update(f"Error starting processing: {str(e)}")
-    
-    def _validate_final_config(self) -> bool:
-        """Perform final validation of the complete configuration."""
-        required_fields = ["input_type", "input_path", "output_dir", "output_format"]
-        
-        for field in required_fields:
-            if field not in self.config_data or not self.config_data[field]:
-                self.query_one("#step-description").update(f"Missing required field: {field}")
-                return False
-        
-        # Validate input path exists
-        if not os.path.exists(self.config_data["input_path"]):
-            self.query_one("#step-description").update("Input path does not exist")
-            return False
-        
-        # Set default values for optional fields
-        self.config_data.setdefault("fps", 10)
-        self.config_data.setdefault("width", 0)
-        self.config_data.setdefault("force_overwrite", False)
-        
-        return True
-    
-    def action_cancel(self) -> None:
-        """Cancel configuration and return to main screen."""
-        self.app.pop_screen()
+        # Push the processing screen with our configuration
+        processing_screen = TwoPhaseProcessingScreen(self.config_data)
+        self.app.push_screen(processing_screen)
     
     def action_help(self) -> None:
-        """Show help information."""
-        current_step_name = self.steps[self.current_step]
-        handler = self.step_handlers[current_step_name]
-        
-        help_text = handler.get_help_text() if hasattr(handler, 'get_help_text') else """
+        """Show help information - same as legacy."""
+        help_text = """
 # Sharp Frames Configuration Help
 
-This wizard will guide you through configuring Sharp Frames for two-phase processing:
+**Two-Phase Mode**: This new mode separates frame extraction from selection, allowing you to:
+1. Extract and analyze all frames first
+2. Interactively select frames with real-time preview
+3. Adjust selection criteria without re-processing
 
-## Phase 1: Extraction & Analysis
-- Extract frames from videos or load images from directories
-- Calculate sharpness scores for all frames
-- Prepare data for interactive selection
+## Configuration Steps
 
-## Phase 2: Interactive Selection  
-- Choose selection method and parameters interactively
-- See real-time preview of how many frames will be selected
-- Adjust parameters and see immediate feedback
+**Input Type**: Choose between single video, video directory, or image directory.
 
-## Configuration Steps:
-1. **Input Type**: Choose video, video directory, or image directory
-2. **Input Path**: Select the path to your input
-3. **Output Directory**: Choose where to save selected frames  
-4. **FPS**: Frame extraction rate (video inputs only)
-5. **Output Format**: Image format for saved frames
-6. **Width**: Resize width (0 for original size)
-7. **Force Overwrite**: Overwrite existing files without asking
-8. **Confirm**: Review settings and start processing
+**Input Path**: Specify the path to your video file(s) or image directory.
 
-The selection method will be chosen interactively after frame analysis is complete.
+**Output Directory**: Where selected frames will be saved.
+
+**FPS** (video only): Frames per second to extract from video.
+
+**Output Format**: Image format for saved frames (JPG or PNG).
+
+**Width**: Optional resizing width (maintains aspect ratio).
+
+**Force Overwrite**: Overwrite existing files without confirmation.
+
+## Selection Process
+
+After configuration, frames will be extracted and analyzed. You'll then see an interactive selection screen where you can:
+- Choose selection method (Best N, Batched, Outlier Removal)
+- Adjust parameters with real-time preview
+- See exactly how many frames will be selected
+
+Press F1 on any screen for context-specific help.
         """
-        
         self.app.push_screen("help", help_text)
     
     def get_current_step_name(self) -> str:
         """Get the name of the current step."""
         return self.steps[self.current_step]
-    
-    def get_config_data(self) -> Dict[str, Any]:
-        """Get current configuration data."""
-        return self.config_data.copy()
-    
-    def set_config_data(self, key: str, value: Any) -> None:
-        """Set configuration data for a key."""
-        self.config_data[key] = value
-    
-    def get_step_progress(self) -> tuple:
-        """Get current step progress as (current, total)."""
-        return (self.current_step + 1, len(self.steps))
 
 
 # Create alias for backward compatibility

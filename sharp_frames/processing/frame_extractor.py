@@ -20,9 +20,10 @@ class FrameExtractor:
         """Initialize FrameExtractor."""
         self.SUPPORTED_IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff'}
         
-    def extract_frames(self, config: Dict[str, Any]) -> ExtractionResult:
+    def extract_frames(self, config: Dict[str, Any], progress_callback=None) -> ExtractionResult:
         """Extract/load frames based on input type."""
         input_type = config.get('input_type')
+        self.progress_callback = progress_callback
         
         if input_type == 'directory':
             return self._load_images(config['input_path'])
@@ -300,7 +301,7 @@ class FrameExtractor:
     
     def _run_ffmpeg_extraction(self, video_path: str, output_dir: str, fps: int, 
                               output_format: str, width: int, duration: Optional[float] = None) -> bool:
-        """Run FFmpeg to extract frames from video."""
+        """Run FFmpeg to extract frames from video with progress monitoring."""
         output_pattern = os.path.join(output_dir, f"frame_%05d.{output_format}")
         
         # Build video filters
@@ -319,17 +320,65 @@ class FrameExtractor:
         ]
         
         try:
+            # Estimate total frames if duration is available
+            estimated_total = 0
+            if duration and fps:
+                estimated_total = int(duration * fps)
+                if self.progress_callback:
+                    self.progress_callback("extraction", 0, estimated_total, f"Extracting frames at {fps}fps")
+            else:
+                if self.progress_callback:
+                    self.progress_callback("extraction", 0, 0, "Extracting frames (unknown total)")
+            
             # Set timeout based on duration if available
             timeout = 3600  # 1 hour default
             if duration:
                 # Rough estimation: 10 seconds per minute of video
                 timeout = max(300, int(duration * 10))
             
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            # Start FFmpeg process for progress monitoring
+            import threading
+            import time
             
-            if result.returncode != 0:
-                print(f"FFmpeg error: {result.stderr}")
+            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            
+            # Monitor progress by counting extracted files
+            last_file_count = 0
+            start_time = time.time()
+            
+            while process.poll() is None:
+                # Check for timeout
+                if time.time() - start_time > timeout:
+                    process.kill()
+                    raise subprocess.TimeoutExpired(cmd, timeout)
+                
+                # Count extracted files
+                if os.path.exists(output_dir):
+                    file_count = len([f for f in os.listdir(output_dir) if f.startswith('frame_')])
+                    
+                    if file_count > last_file_count and self.progress_callback:
+                        if estimated_total:
+                            self.progress_callback("extraction", file_count, estimated_total, 
+                                                f"Extracted {file_count}/{estimated_total} frames")
+                        else:
+                            self.progress_callback("extraction", file_count, 0, f"Extracted {file_count} frames")
+                        last_file_count = file_count
+                
+                time.sleep(0.1)  # Small delay to avoid excessive polling
+            
+            # Get final results
+            stdout, stderr = process.communicate()
+            
+            if process.returncode != 0:
+                print(f"FFmpeg error: {stderr}")
                 return False
+            
+            # Final progress update
+            if os.path.exists(output_dir):
+                final_frame_count = len([f for f in os.listdir(output_dir) if f.startswith('frame_')])
+                if self.progress_callback:
+                    self.progress_callback("extraction", final_frame_count, final_frame_count, 
+                                        f"Extraction complete: {final_frame_count} frames")
                 
             return True
             

@@ -3,12 +3,11 @@ Interactive selection screen for Sharp Frames TUI.
 """
 
 import asyncio
-from typing import Dict, Any, Optional, Callable
+from typing import Dict, Any, Optional
 from textual.app import ComposeResult
-from textual.containers import Container, Horizontal, Vertical
+from textual.containers import Container, Horizontal
 from textual.widgets import (
-    Header, Footer, Button, Static, Label, Select, Input, 
-    ProgressBar, Collapsible, Sparkline
+    Header, Footer, Button, Static, Label, Select, Input
 )
 from textual.screen import Screen
 from textual.binding import Binding
@@ -17,7 +16,6 @@ from textual.reactive import reactive
 
 from ...processing.tui_processor import TUIProcessor
 from ...models.frame_data import ExtractionResult
-from ...selection_preview import get_selection_preview
 
 
 class SelectionScreen(Screen):
@@ -58,91 +56,93 @@ class SelectionScreen(Screen):
         
         # Selection state
         self.current_method = "best_n"
-        self.current_parameters = {"n": 50}  # Default parameters
+        self.current_parameters = {"n": 300, "min_buffer": 3}  # Default parameters for best_n
         self.preview_task = None  # For debouncing preview updates
         
-        # Method definitions with default parameters
+        # Method definitions with default parameters - matching legacy application exactly
         self.method_definitions = {
             "best_n": {
                 "name": "Best N Frames",
                 "description": "Select the N sharpest frames with good distribution",
                 "parameters": {
-                    "n": {"type": "int", "default": 50, "min": 1, "max": 10000, "label": "Number of frames"}
+                    "n": {"type": "int", "default": 300, "min": 1, "max": 10000, "label": "Number of frames"},
+                    "min_buffer": {"type": "int", "default": 3, "min": 0, "max": 100, "label": "Minimum distance between frames"}
                 }
             },
             "batched": {
                 "name": "Batched Selection", 
-                "description": "Divide into batches and select the sharpest from each",
+                "description": "Process frames in small consecutive groups with gaps between groups",
                 "parameters": {
-                    "batch_count": {"type": "int", "default": 10, "min": 1, "max": 1000, "label": "Number of batches"}
+                    "batch_size": {"type": "int", "default": 5, "min": 1, "max": 100, "label": "Frames per batch"},
+                    "batch_buffer": {"type": "int", "default": 2, "min": 0, "max": 50, "label": "Frames to skip between batches"}
                 }
             },
             "outlier_removal": {
                 "name": "Outlier Removal",
-                "description": "Remove frames with unusually low sharpness scores",
+                "description": "Remove frames with unusually low sharpness scores compared to neighbors",
                 "parameters": {
-                    "factor": {"type": "float", "default": 1.5, "min": 0.1, "max": 3.0, "step": 0.1, "label": "Sensitivity factor"}
+                    "outlier_sensitivity": {"type": "int", "default": 50, "min": 0, "max": 100, "label": "Removal aggressiveness (0-100)"},
+                    "outlier_window_size": {"type": "int", "default": 15, "min": 3, "max": 30, "label": "Neighbor comparison window"}
                 }
             }
         }
     
     def compose(self) -> ComposeResult:
-        """Create the selection screen UI layout."""
+        """Create a clean, focused selection screen UI."""
         yield Header()
         
-        with Container(id="selection_container"):
-            # Frame information section
-            with Container(id="frame_info_section", classes="section"):
-                yield Label(f"📊 Frame Analysis Complete", classes="section_header")
-                with Horizontal(classes="info_grid"):
-                    yield Static(f"Total frames: {len(self.extraction_result.frames):,}", id="total_frames")
-                    yield Static(f"Input type: {self.extraction_result.input_type}", id="input_type") 
-                    
-                    stats = self.processor.get_sharpness_statistics()
-                    if stats:
-                        yield Static(f"Avg sharpness: {stats['average']:.1f}", id="avg_sharpness")
-                        yield Static(f"Range: {stats['min']:.1f} - {stats['max']:.1f}", id="sharpness_range")
+        # Calculate initial values
+        total_frames = len(self.extraction_result.frames)
+        initial_count = min(300, total_frames)  # Default to 300 or total if less
+        
+        # Main container with all content
+        with Container(id="main_content"):
+            # Title section
+            yield Static("Select Frames", classes="main_title")
+            yield Static(f"Choose from {total_frames:,} analyzed frames", classes="subtitle")
             
-            # Method selection section
-            with Container(id="method_section", classes="section"):
-                yield Label("🎯 Selection Method", classes="section_header")
-                yield Select(
-                    options=[(key, info["name"]) for key, info in self.method_definitions.items()],
-                    value=self.current_method,
-                    id="method_select"
-                )
-                yield Static("", id="method_description", classes="method_description")
-            
-            # Parameters section
-            with Container(id="parameters_section", classes="section"):
-                yield Label("⚙️ Parameters", classes="section_header")
-                with Container(id="parameter_inputs"):
-                    pass  # Will be populated dynamically
-            
-            # Preview section
-            with Container(id="preview_section", classes="section"):
-                yield Label("👀 Selection Preview", classes="section_header")
-                with Horizontal(classes="preview_grid"):
-                    yield Static("Selected frames: 0", id="preview_count", classes="preview_stat")
-                    yield Static("Percentage: 0.0%", id="preview_percentage", classes="preview_stat")
+            # Controls section - method and parameters side by side
+            with Horizontal(id="controls_section", classes="controls"):
+                # Method selection on the left
+                with Container(id="method_container", classes="control_group"):
+                    yield Label("Selection Method", classes="control_label")
+                    yield Select(
+                        options=[(info["name"], key) for key, info in self.method_definitions.items()],
+                        value=self.current_method,
+                        id="method_select"
+                    )
+                    yield Static(self.method_definitions[self.current_method]["description"], 
+                               id="method_description", classes="description")
                 
-                with Collapsible(title="📈 Detailed Statistics", collapsed=True):
-                    yield Static("Min sharpness: 0.0", id="preview_min_sharpness")
-                    yield Static("Max sharpness: 0.0", id="preview_max_sharpness") 
-                    yield Static("Avg sharpness: 0.0", id="preview_avg_sharpness")
-                    yield Sparkline([0], id="preview_distribution", classes="distribution_chart")
+                # Parameters on the right
+                with Container(id="parameter_container", classes="control_group"):
+                    yield Label("Parameters", classes="control_label")
+                    with Container(id="parameter_inputs", classes="parameter_inputs"):
+                        # Initial parameters for best_n method (default)
+                        yield Label("Number of frames:", classes="param_label")
+                        yield Input(
+                            value="300",
+                            id="param_best_n_n",
+                            classes="param_input"
+                        )
+                        yield Label("Minimum distance between frames:", classes="param_label")
+                        yield Input(
+                            value="3",
+                            id="param_best_n_min_buffer",
+                            classes="param_input"
+                        )
             
-            # Action buttons
-            with Horizontal(id="action_buttons", classes="button_row"):
+            # Action buttons inside main content for better positioning
+            with Horizontal(id="action_buttons", classes="action_buttons"):
                 yield Button("← Back", id="back_button", variant="default")
-                yield Button("Confirm Selection", id="confirm_button", variant="primary")
+                yield Button(f"Save {initial_count:,} Images", id="confirm_button", variant="success")
         
         yield Footer()
     
     def on_mount(self) -> None:
         """Initialize the screen when mounted."""
-        self._update_method_description()
-        self._update_parameter_inputs() 
+        # Parameter inputs are already created in compose() with correct initial values
+        # Just update the preview with the initial values
         self._update_preview_async()
     
     def on_select_changed(self, event: Select.Changed) -> None:
@@ -158,33 +158,60 @@ class SelectionScreen(Screen):
                 self.current_parameters[param_name] = param_info["default"]
             
             self._update_method_description()
-            self._update_parameter_inputs()
+            # Use async task for parameter updates
+            asyncio.create_task(self._update_parameter_inputs_async())
             self._update_preview_async()
     
     def on_input_changed(self, event: Input.Changed) -> None:
         """Handle parameter input changes."""
         input_id = event.input.id
-        if input_id and input_id.startswith("param_"):
-            param_name = input_id[6:]  # Remove "param_" prefix
+        if not input_id or not input_id.startswith("param_"):
+            return
             
-            try:
-                # Parse and validate the parameter value
-                param_info = self.method_definitions[self.current_method]["parameters"][param_name]
+        # Extract method and parameter name from ID
+        # Format: param_{method}_{param_name}
+        for method in self.method_definitions:
+            prefix = f"param_{method}_"
+            if input_id.startswith(prefix):
+                param_name = input_id[len(prefix):]
                 
-                if param_info["type"] == "int":
-                    value = int(event.value) if event.value else param_info["default"]
-                    value = max(param_info.get("min", 1), min(value, param_info.get("max", 10000)))
-                elif param_info["type"] == "float":
-                    value = float(event.value) if event.value else param_info["default"]
-                    value = max(param_info.get("min", 0.1), min(value, param_info.get("max", 3.0)))
-                else:
-                    value = event.value
+                # Only process inputs for the current method
+                if method != self.current_method:
+                    return
                 
+                self._handle_parameter_change(param_name, event.value)
+                return
+    
+    def _handle_parameter_change(self, param_name: str, value_str: str) -> None:
+        """Process a parameter value change."""
+        try:
+            param_info = self.method_definitions[self.current_method]["parameters"][param_name]
+            
+            # Parse and validate the value
+            if not value_str.strip():
+                value = param_info["default"]
+            elif param_info["type"] == "int":
+                value = int(value_str)
+                value = max(param_info.get("min", 1), min(value, param_info.get("max", 10000)))
+            else:
+                value = value_str
+                
+            # Update if changed
+            old_value = self.current_parameters.get(param_name)
+            if old_value != value:
                 self.current_parameters[param_name] = value
                 self._update_preview_async()
                 
-            except (ValueError, KeyError):
-                # Invalid input, ignore for now
+        except (ValueError, KeyError) as e:
+            # Invalid input - revert to current value
+            self.app.log.warning(f"Invalid input for {param_name}: '{value_str}'")
+            try:
+                current_value = self.current_parameters.get(param_name, 
+                    self.method_definitions[self.current_method]["parameters"][param_name]["default"])
+                # Find the input widget and reset its value
+                input_widget = self.query_one(f"#param_{self.current_method}_{param_name}", Input)
+                input_widget.value = str(current_value)
+            except:
                 pass
     
     def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -205,18 +232,31 @@ class SelectionScreen(Screen):
     def action_help(self) -> None:
         """Show help information."""
         help_text = """
-# Selection Methods
+# Frame Selection
 
-**Best N Frames**: Selects the N sharpest frames while maintaining good distribution across the timeline.
+Choose how to select the best frames from your analyzed video/images.
 
-**Batched Selection**: Divides frames into batches and selects the sharpest frame from each batch.
+## Selection Methods
 
-**Outlier Removal**: Removes frames with unusually low sharpness compared to their neighbors.
+**Best N Frames**: Select a specific number of the sharpest frames with good distribution across the timeline. Ideal when you know exactly how many frames you need.
 
-# Shortcuts
+**Batched Selection**: Divide all frames into equal groups and pick the sharpest from each group. Great for ensuring even coverage across the entire video.
 
-- **Enter**: Confirm selection
-- **Escape**: Cancel and return
+**Outlier Removal**: Automatically remove frames that are significantly blurrier than their neighbors. Best when you want to keep most frames but remove the obviously bad ones.
+
+## How It Works
+
+1. **Choose a method** from the dropdown
+2. **Adjust parameters** as needed 
+3. **Watch the count update** in real-time as you change settings
+4. **Press "Process"** when you're happy with the selection
+
+The preview count updates instantly as you make changes, so you can experiment freely!
+
+## Shortcuts
+
+- **Enter**: Process selected frames
+- **Escape**: Go back to configuration  
 - **F1**: Show this help
         """
         self.app.push_screen("help", help_text)
@@ -227,27 +267,56 @@ class SelectionScreen(Screen):
         description_widget = self.query_one("#method_description", Static)
         description_widget.update(description)
     
-    def _update_parameter_inputs(self) -> None:
-        """Update parameter input widgets based on selected method."""
-        container = self.query_one("#parameter_inputs", Container)
-        
-        # Clear existing inputs
-        container.remove_children()
-        
-        # Add inputs for current method
-        method_info = self.method_definitions[self.current_method]
-        for param_name, param_info in method_info["parameters"].items():
-            with container:
-                label = Label(param_info["label"])
+    async def _update_parameter_inputs_async(self) -> None:
+        """Update parameter input widgets based on selected method (async version)."""
+        try:
+            container = self.query_one("#parameter_inputs", Container)
+            
+            # Get all current children to remove
+            children_to_remove = list(container.children)
+            
+            # Remove all children and wait for removal
+            for child in children_to_remove:
+                await child.remove()
+            
+            # Add inputs for current method
+            method_info = self.method_definitions[self.current_method]
+            widgets_to_mount = []
+            first_input = None
+            param_count = 0
+            
+            for param_name, param_info in method_info["parameters"].items():
+                input_id = f"param_{self.current_method}_{param_name}"
+                current_value = self.current_parameters.get(param_name, param_info["default"])
+                
+                # Create label
+                label = Label(param_info["label"] + ":", classes="param_label")
+                widgets_to_mount.append(label)
                 
                 if param_info["type"] in ["int", "float"]:
+                    # Create input widget
                     input_widget = Input(
-                        str(self.current_parameters.get(param_name, param_info["default"])),
-                        id=f"param_{param_name}",
-                        placeholder=str(param_info["default"])
+                        value=str(current_value),
+                        id=input_id,
+                        classes="param_input"
                     )
-                    container.mount(label)
-                    container.mount(input_widget)
+                    widgets_to_mount.append(input_widget)
+                    param_count += 1
+                    
+                    # Remember first input for focus
+                    if param_count == 1:
+                        first_input = input_widget
+            
+            # Mount all widgets at once and wait for completion
+            if widgets_to_mount:
+                await container.mount_all(widgets_to_mount)
+            
+            # Focus the first input after mounting is complete
+            if first_input:
+                first_input.focus()
+                    
+        except Exception as e:
+            self.app.log.error(f"Error updating parameter inputs: {e}")
     
     def _update_preview_async(self) -> None:
         """Update preview with debouncing to avoid too frequent updates."""
@@ -280,45 +349,17 @@ class SelectionScreen(Screen):
             self.app.log.error(f"Error updating preview: {e}")
     
     def _update_preview_display(self, count: int) -> None:
-        """Update the preview display with new count."""
+        """Update the preview display with new count in the button."""
         self.selected_count = count
         
-        total_frames = len(self.extraction_result.frames)
-        percentage = (count / total_frames * 100) if total_frames > 0 else 0
-        
-        # Update basic stats
-        self.query_one("#preview_count", Static).update(f"Selected frames: {count:,}")
-        self.query_one("#preview_percentage", Static).update(f"Percentage: {percentage:.1f}%")
-        
-        # Try to get detailed preview for statistics
-        try:
-            # Convert frames to dict format for preview function
-            frames_dict = []
-            for frame in self.extraction_result.frames:
-                frames_dict.append({
-                    'id': f"frame_{frame.index:05d}",
-                    'path': frame.path,
-                    'index': frame.index,
-                    'sharpnessScore': frame.sharpness_score
-                })
-            
-            # Get detailed preview
-            preview = get_selection_preview(frames_dict, self.current_method, **self.current_parameters)
-            
-            # Update detailed statistics
-            stats = preview.get('statistics', {})
-            self.query_one("#preview_min_sharpness", Static).update(f"Min sharpness: {stats.get('min_sharpness', 0):.1f}")
-            self.query_one("#preview_max_sharpness", Static).update(f"Max sharpness: {stats.get('max_sharpness', 0):.1f}")
-            self.query_one("#preview_avg_sharpness", Static).update(f"Avg sharpness: {stats.get('avg_sharpness', 0):.1f}")
-            
-            # Update distribution sparkline
-            distribution = preview.get('distribution', [])
-            if distribution:
-                sparkline = self.query_one("#preview_distribution", Sparkline)
-                sparkline.data = distribution
-                
-        except Exception as e:
-            self.app.log.warning(f"Could not update detailed preview: {e}")
+        # Update the action button to show what will happen
+        confirm_btn = self.query_one("#confirm_button", Button)
+        if count > 0:
+            confirm_btn.label = f"Save {count:,} Images"
+            confirm_btn.disabled = False
+        else:
+            confirm_btn.label = "No Images Selected"
+            confirm_btn.disabled = True
     
     def _start_final_processing(self) -> None:
         """Start the final processing phase (selection and saving)."""
@@ -326,10 +367,10 @@ class SelectionScreen(Screen):
         self.query_one("#confirm_button", Button).disabled = True
         self.query_one("#method_select", Select).disabled = True
         
-        # Update config with selection method and parameters
+        # Create final config without mixing in selection parameters
+        # The parameters will be passed separately to complete_selection
         final_config = self.config.copy()
         final_config['selection_method'] = self.current_method
-        final_config.update(self.current_parameters)
         
         # Start processing in background
         asyncio.create_task(self._process_final_selection(final_config))
@@ -337,24 +378,49 @@ class SelectionScreen(Screen):
     async def _process_final_selection(self, final_config: Dict[str, Any]) -> None:
         """Process the final selection and saving."""
         try:
+            with open("debug_save.log", "a") as f:
+                f.write(f"=== SAVE PROCESS STARTED ===\n")
+                f.write(f"Method: {self.current_method}\n")
+                f.write(f"Parameters: {self.current_parameters}\n")
+                f.write(f"Config: {final_config}\n")
+                f.write(f"Total frames available: {len(self.extraction_result.frames)}\n")
+            
             # Show processing indicator
             processing_label = Label("🔄 Processing selection...", classes="processing_indicator")
-            self.query_one("#selection_container").mount(processing_label)
+            self.query_one("#main_content").mount(processing_label)
             
-            # Run the final selection (this is CPU intensive, so we might want to thread it)
+            with open("debug_save.log", "a") as f:
+                f.write("Starting executor call...\n")
+            
+            # Run the final selection (this is CPU intensive, so we run it in a thread)
+            # Note: run_in_executor doesn't support keyword arguments, so we use a lambda
             success = await asyncio.get_event_loop().run_in_executor(
                 None, 
-                self.processor.complete_selection,
-                self.current_method,
-                final_config,
-                **self.current_parameters
+                lambda: self.processor.complete_selection(
+                    self.current_method,
+                    final_config,
+                    **self.current_parameters
+                )
             )
             
+            with open("debug_save.log", "a") as f:
+                f.write(f"Executor completed. Success: {success}\n")
+            
             if success:
-                # Show success message briefly, then exit
+                # Show success message briefly, then return to configuration screen
                 processing_label.update("✅ Selection completed successfully!")
                 await asyncio.sleep(2)
-                self.app.pop_screen()
+                
+                # Reset configuration screen to first step
+                # The configuration screen should be at index 0 in the screen stack
+                if len(self.app.screen_stack) >= 3:  # Config, Processing, Selection
+                    config_screen = self.app.screen_stack[0]
+                    if hasattr(config_screen, 'reset_to_first_step'):
+                        config_screen.reset_to_first_step()
+                
+                # Pop both selection and processing screens to return to configuration
+                self.app.pop_screen()  # Pop selection screen
+                self.app.pop_screen()  # Pop processing screen
             else:
                 # Show error and re-enable UI
                 processing_label.update("❌ Selection failed. Please try again.")
@@ -364,6 +430,12 @@ class SelectionScreen(Screen):
                 self.query_one("#method_select", Select).disabled = False
                 
         except Exception as e:
+            with open("debug_save.log", "a") as f:
+                f.write(f"EXCEPTION in SelectionScreen._process_final_selection: {e}\n")
+                f.write(f"Exception type: {type(e).__name__}\n")
+                import traceback
+                f.write(f"Traceback:\n{traceback.format_exc()}\n")
+            
             self.app.log.error(f"Error during final processing: {e}")
             # Re-enable UI on error
             try:
@@ -374,10 +446,3 @@ class SelectionScreen(Screen):
                 pass
             self.query_one("#confirm_button", Button).disabled = False
             self.query_one("#method_select", Select).disabled = False
-    
-    def _format_frame_count(self, count: int) -> str:
-        """Format frame count for display."""
-        if count == 1:
-            return "1 frame"
-        else:
-            return f"{count:,} frames"

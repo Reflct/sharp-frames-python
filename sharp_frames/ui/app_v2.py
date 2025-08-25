@@ -84,8 +84,6 @@ class TwoPhaseSharpFramesApp(App):
         # Reset escape count for other keys
         elif event.key != "escape":
             self._escape_count = 0
-        
-        super().on_key(event)
     
     def action_cancel(self) -> None:
         """Handle cancel action with spurious escape sequence protection."""

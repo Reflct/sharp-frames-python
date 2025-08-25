@@ -28,12 +28,13 @@ class SharpnessAnalyzer:
         """
         self.max_workers = max_workers or cpu_count()
         
-    def calculate_sharpness(self, extraction_result: ExtractionResult) -> ExtractionResult:
+    def calculate_sharpness(self, extraction_result: ExtractionResult, progress_callback=None) -> ExtractionResult:
         """
         Add sharpness scores to frame data, preserving all metadata.
         
         Args:
             extraction_result: Result from frame extraction phase
+            progress_callback: Optional callback for progress updates
             
         Returns:
             Updated ExtractionResult with sharpness scores
@@ -44,10 +45,18 @@ class SharpnessAnalyzer:
         # Extract frame paths for parallel processing
         frame_paths = [frame.path for frame in extraction_result.frames]
         
+        # Report sharpness analysis starting
+        if progress_callback:
+            desc = "Calculating sharpness for frames" if extraction_result.input_type in ["video", "video_directory"] else "Calculating sharpness for images"
+            progress_callback("sharpness", 0, len(frame_paths), desc)
+        
+        # Use provided callback or create default one for tqdm fallback
+        callback = progress_callback or self._create_progress_callback(extraction_result.input_type)
+        
         # Calculate sharpness scores in parallel
         sharpness_scores = self._calculate_sharpness_parallel(
             frame_paths, 
-            progress_callback=self._create_progress_callback(extraction_result.input_type)
+            progress_callback=callback
         )
         
         # Update frame data with sharpness scores
@@ -80,14 +89,22 @@ class SharpnessAnalyzer:
         """
         scores = []
         total_frames = len(frame_paths)
+        processed_count = 0
         
         # Process in chunks for memory efficiency with large datasets
         for chunk_start in range(0, total_frames, chunk_size):
             chunk_end = min(chunk_start + chunk_size, total_frames)
             chunk_paths = frame_paths[chunk_start:chunk_end]
             
-            chunk_scores = self._process_chunk_parallel(chunk_paths, progress_callback)
+            # Create chunk-aware progress callback that tracks overall progress
+            def chunk_progress_callback(phase, chunk_completed, chunk_total, description):
+                if progress_callback:
+                    overall_completed = processed_count + chunk_completed
+                    progress_callback(phase, overall_completed, total_frames, description)
+            
+            chunk_scores = self._process_chunk_parallel(chunk_paths, chunk_progress_callback)
             scores.extend(chunk_scores)
+            processed_count += len(chunk_paths)
         
         return scores
     
@@ -96,6 +113,10 @@ class SharpnessAnalyzer:
         """Process a chunk of frames in parallel."""
         scores = [0.0] * len(frame_paths)  # Initialize with default scores
         num_workers = min(self.max_workers, len(frame_paths)) if frame_paths else 1
+        
+        # Track progress across the chunk
+        completed_count = 0
+        total_frames = len(frame_paths)
         
         futures = {}
         try:
@@ -115,15 +136,15 @@ class SharpnessAnalyzer:
                         score = future.result()
                         scores[idx] = score
                         
-                        if progress_callback:
-                            progress_callback(1, len(frame_paths))
-                            
                     except Exception as e:
                         print(f"Warning: Failed to process {path}: {e}")
                         scores[idx] = 0.0  # Use default score for failed frames
-                        
-                        if progress_callback:
-                            progress_callback(1, len(frame_paths))
+                    
+                    # Update progress after each frame
+                    completed_count += 1
+                    if progress_callback:
+                        progress_callback("sharpness", completed_count, total_frames, 
+                                        f"Analyzed {completed_count}/{total_frames} frames")
         
         except Exception as e:
             print(f"Error in parallel processing: {e}")

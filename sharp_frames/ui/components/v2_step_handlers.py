@@ -67,10 +67,14 @@ class InputTypeStepHandler(TwoPhaseStepHandler):
         container.mount(Label("What type of input do you want to process?", classes="question"))
         
         # Create radio buttons for input types
-        with container.mount(RadioSet(id="input-type-selection")):
-            container.mount(RadioButton("Single video file", id="video", value=True))
-            container.mount(RadioButton("Directory of video files", id="video_directory"))
-            container.mount(RadioButton("Directory of images", id="image_directory"))
+        container.mount(
+            RadioSet(
+                RadioButton("Single video file", id="video", value=True),
+                RadioButton("Directory of video files", id="video_directory"),
+                RadioButton("Directory of images", id="image_directory"),
+                id="input-type-selection"
+            )
+        )
     
     def validate(self, screen) -> bool:
         """Validate input type selection."""
@@ -85,10 +89,11 @@ class InputTypeStepHandler(TwoPhaseStepHandler):
         try:
             radio_set = screen.query_one("#input-type-selection", RadioSet)
             if radio_set.pressed_index is not None:
-                pressed_button = radio_set.pressed_button
-                return {"input_type": pressed_button.id}
-        except:
-            pass
+                # Map the pressed index to the input type
+                input_types = ["video", "video_directory", "image_directory"]
+                return {"input_type": input_types[radio_set.pressed_index]}
+        except Exception as e:
+            screen.app.log.error(f"Error getting input type data: {e}")
         return {}
     
     def set_data(self, screen, data: Any) -> None:
@@ -98,13 +103,12 @@ class InputTypeStepHandler(TwoPhaseStepHandler):
         try:
             input_type = data.get("input_type", "video")
             radio_set = screen.query_one("#input-type-selection", RadioSet)
-            for button in radio_set.query(RadioButton):
-                if button.id == input_type:
-                    button.value = True
-                else:
-                    button.value = False
-        except:
-            pass
+            # Map the input type to the index
+            input_types = ["video", "video_directory", "image_directory"]
+            if input_type in input_types:
+                radio_set.pressed_index = input_types.index(input_type)
+        except Exception as e:
+            screen.app.log.error(f"Error setting input type data: {e}")
 
 
 class InputPathStepHandler(TwoPhaseStepHandler):
@@ -265,9 +269,12 @@ class FpsStepHandler(TwoPhaseStepHandler):
         container.mount(Label("At what rate should frames be extracted?", classes="question"))
         container.mount(Static("Higher values extract more frames but take longer to process", classes="hint"))
         
-        with container.mount(Horizontal()):
-            container.mount(Label("FPS:", classes="parameter-label"))
-            container.mount(Input(value="10", placeholder="10", id="fps-input"))
+        container.mount(
+            Horizontal(
+                Label("FPS:", classes="parameter-label"),
+                Input(value="10", placeholder="10", id="fps-input")
+            )
+        )
     
     def validate(self, screen) -> bool:
         """Validate FPS value."""
@@ -377,10 +384,13 @@ class WidthStepHandler(TwoPhaseStepHandler):
         container.mount(Label("What should be the width of output images?", classes="question"))
         container.mount(Static("Enter 0 to keep original size, or specify width in pixels", classes="hint"))
         
-        with container.mount(Horizontal()):
-            container.mount(Label("Width:", classes="parameter-label"))
-            container.mount(Input(value="0", placeholder="0", id="width-input"))
-            container.mount(Label("pixels"))
+        container.mount(
+            Horizontal(
+                Label("Width:", classes="parameter-label"),
+                Input(value="0", placeholder="0", id="width-input"),
+                Label("pixels")
+            )
+        )
     
     def validate(self, screen) -> bool:
         """Validate width value."""
@@ -482,29 +492,33 @@ class ConfirmStepHandler(TwoPhaseStepHandler):
         """Render the confirmation step."""
         container.mount(Label("Please review your configuration:", classes="question"))
         
-        with container.mount(Vertical(classes="summary")):
-            # Show configuration summary
-            config = screen.config_data
+        # Show configuration summary
+        config = screen.config_data
+        
+        # Build summary items
+        summary_items = [
+            Static(f"Input Type: {config.get('input_type', 'Unknown')}"),
+            Static(f"Input Path: {config.get('input_path', 'Not set')}"),
+            Static(f"Output Directory: {config.get('output_dir', 'Not set')}")
+        ]
+        
+        # Show FPS only for video inputs
+        input_type = config.get('input_type', '')
+        if input_type in ['video', 'video_directory']:
+            summary_items.append(Static(f"Frame Rate: {config.get('fps', 10)} FPS"))
+        
+        summary_items.append(Static(f"Output Format: {config.get('output_format', 'jpg').upper()}"))
+        
+        width = config.get('width', 0)
+        if width == 0:
+            summary_items.append(Static("Width: Original size"))
+        else:
+            summary_items.append(Static(f"Width: {width} pixels"))
             
-            container.mount(Static(f"Input Type: {config.get('input_type', 'Unknown')}"))
-            container.mount(Static(f"Input Path: {config.get('input_path', 'Not set')}"))
-            container.mount(Static(f"Output Directory: {config.get('output_dir', 'Not set')}"))
-            
-            # Show FPS only for video inputs
-            input_type = config.get('input_type', '')
-            if input_type in ['video', 'video_directory']:
-                container.mount(Static(f"Frame Rate: {config.get('fps', 10)} FPS"))
-            
-            container.mount(Static(f"Output Format: {config.get('output_format', 'jpg').upper()}"))
-            
-            width = config.get('width', 0)
-            if width == 0:
-                container.mount(Static("Width: Original size"))
-            else:
-                container.mount(Static(f"Width: {width} pixels"))
-                
-            overwrite = config.get('force_overwrite', False)
-            container.mount(Static(f"Force Overwrite: {'Yes' if overwrite else 'No'}"))
+        overwrite = config.get('force_overwrite', False)
+        summary_items.append(Static(f"Force Overwrite: {'Yes' if overwrite else 'No'}"))
+        
+        container.mount(Vertical(*summary_items, classes="summary"))
         
         container.mount(Static("Click 'Start Processing' to begin frame extraction and analysis.", classes="hint"))
     

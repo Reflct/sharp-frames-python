@@ -24,9 +24,8 @@ class MockFrameData:
     output_name: Optional[str] = None
 
 
-@pytest.fixture
-def sample_frames_data():
-    """Generate sample frame data with known sharpness scores."""
+def create_sample_frames_data():
+    """Generate sample frame data with known sharpness scores (not a fixture)."""
     frames = []
     for i in range(100):
         # Create varied sharpness scores for testing selection algorithms
@@ -44,6 +43,12 @@ def sample_frames_data():
             output_name=f"{i+1:05d}"
         ))
     return frames
+
+
+@pytest.fixture
+def sample_frames_data():
+    """Generate sample frame data with known sharpness scores."""
+    return create_sample_frames_data()
 
 
 @pytest.fixture

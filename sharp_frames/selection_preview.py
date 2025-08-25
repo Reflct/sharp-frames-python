@@ -31,15 +31,31 @@ def get_selection_count(frames_with_scores: List[Dict[str, Any]], method: str, *
     
     if method == 'best-n':
         n = params.get('n', 300)
+        min_buffer = params.get('min_buffer', 3)
+        
+        # With min_buffer constraint, we might not be able to select all n frames
+        if min_buffer > 0:
+            required_positions = n + (n - 1) * min_buffer
+            if required_positions > total_frames:
+                # Calculate maximum possible frames with this buffer
+                max_possible = (total_frames + min_buffer) // (min_buffer + 1)
+                return min(n, max_possible)
+        
         return min(max(0, n), total_frames)
     
     elif method == 'batched':
-        batch_count = params.get('batch_count', 5)
-        return min(max(0, batch_count), total_frames)
+        batch_size = params.get('batch_size', 5)
+        batch_buffer = params.get('batch_buffer', 2)
+        
+        # Calculate how many batches can be created
+        step_size = batch_size + batch_buffer
+        if step_size <= 0:
+            return 0
+        return (total_frames + step_size - 1) // step_size if step_size > 0 else 0
     
     elif method == 'outlier-removal':
-        factor = params.get('factor', 1.5)
-        return _preview_outlier_removal_count_fast(frames_with_scores, factor)
+        outlier_sensitivity = params.get('outlier_sensitivity', 50)
+        return _preview_outlier_removal_count_fast(frames_with_scores, outlier_sensitivity)
     
     else:
         raise ValueError(f"Unsupported selection method: {method}")
@@ -87,21 +103,32 @@ def get_selection_preview(frames_with_scores: List[Dict[str, Any]], method: str,
 
 # === Fast Preview Implementations ===
 
-def _preview_outlier_removal_count_fast(frames_with_scores: List[Dict[str, Any]], factor: float) -> int:
-    """Fast heuristic-based preview for outlier removal."""
+def _preview_outlier_removal_count_fast(frames_with_scores: List[Dict[str, Any]], outlier_sensitivity: int) -> int:
+    """Fast heuristic-based preview for outlier removal using legacy sensitivity parameter."""
     total_frames = len(frames_with_scores)
     
-    # Use heuristic based on factor without full outlier calculation
-    if factor >= 2.0:
-        removal_rate = 0.05  # Remove ~5% of frames
-    elif factor >= 1.5:
-        removal_rate = 0.10  # Remove ~10% of frames
-    elif factor >= 1.0:
-        removal_rate = 0.20  # Remove ~20% of frames
-    elif factor >= 0.5:
-        removal_rate = 0.30  # Remove ~30% of frames
-    else:
+    # Use more granular heuristic for responsive preview
+    # Estimate based on sensitivity: higher sensitivity = more aggressive removal
+    if outlier_sensitivity >= 90:
         removal_rate = 0.40  # Remove ~40% of frames
+    elif outlier_sensitivity >= 80:
+        removal_rate = 0.30  # Remove ~30% of frames
+    elif outlier_sensitivity >= 70:
+        removal_rate = 0.25  # Remove ~25% of frames
+    elif outlier_sensitivity >= 60:
+        removal_rate = 0.20  # Remove ~20% of frames
+    elif outlier_sensitivity >= 50:
+        removal_rate = 0.15  # Remove ~15% of frames
+    elif outlier_sensitivity >= 40:
+        removal_rate = 0.10  # Remove ~10% of frames
+    elif outlier_sensitivity >= 30:
+        removal_rate = 0.07  # Remove ~7% of frames
+    elif outlier_sensitivity >= 20:
+        removal_rate = 0.05  # Remove ~5% of frames
+    elif outlier_sensitivity >= 10:
+        removal_rate = 0.03  # Remove ~3% of frames
+    else:
+        removal_rate = 0.01  # Remove ~1% of frames
     
     estimated_selected = int(total_frames * (1.0 - removal_rate))
     return max(1, min(estimated_selected, total_frames))
@@ -139,7 +166,7 @@ def _preview_best_n_detailed(frames_with_scores: List[Dict[str, Any]], count: in
 
 
 def _preview_batched_detailed(frames_with_scores: List[Dict[str, Any]], count: int, **params) -> Dict[str, Any]:
-    """Detailed preview for batched selection."""
+    """Detailed preview for batched selection using legacy parameters."""
     if count == 0:
         return {
             'count': 0,
@@ -148,21 +175,26 @@ def _preview_batched_detailed(frames_with_scores: List[Dict[str, Any]], count: i
         }
     
     total_frames = len(frames_with_scores)
-    batch_count = params.get('batch_count', 5)
-    actual_batches = min(batch_count, total_frames)
+    batch_size = params.get('batch_size', 5)
+    batch_buffer = params.get('batch_buffer', 2)
     
-    # Simulate batched selection
-    batch_size = total_frames // actual_batches if actual_batches > 0 else 1
+    # Simulate legacy batched selection
+    step_size = batch_size + batch_buffer
     selected_frames = []
     
-    for i in range(actual_batches):
-        start_idx = i * batch_size
-        end_idx = min((i + 1) * batch_size, total_frames) if i < actual_batches - 1 else total_frames
+    i = 0
+    while i < total_frames:
+        # Take a batch of consecutive frames
+        batch = frames_with_scores[i:i + batch_size]
+        if not batch:
+            break
         
-        batch = frames_with_scores[start_idx:end_idx]
-        if batch:
-            best_frame = max(batch, key=lambda x: x.get('sharpnessScore', 0))
-            selected_frames.append(best_frame)
+        # Select best frame from this batch
+        best_frame = max(batch, key=lambda x: x.get('sharpnessScore', 0))
+        selected_frames.append(best_frame)
+        
+        # Move to next batch position (skip batch_buffer frames)
+        i += step_size
     
     # Calculate statistics
     selected_scores = [frame.get('sharpnessScore', 0) for frame in selected_frames]
@@ -183,9 +215,9 @@ def _preview_batched_detailed(frames_with_scores: List[Dict[str, Any]], count: i
 
 
 def _preview_outlier_removal_detailed(frames_with_scores: List[Dict[str, Any]], **params) -> Dict[str, Any]:
-    """Detailed preview for outlier removal selection."""
-    factor = params.get('factor', 1.5)
-    window_size = params.get('window_size', 15)
+    """Detailed preview for outlier removal selection using legacy parameters."""
+    outlier_sensitivity = params.get('outlier_sensitivity', 50)
+    outlier_window_size = params.get('outlier_window_size', 15)
     
     # For detailed preview, we need to do actual outlier calculation
     # But optimize for common cases
@@ -197,7 +229,7 @@ def _preview_outlier_removal_detailed(frames_with_scores: List[Dict[str, Any]], 
         selected_frames = frames_with_scores
     else:
         # Use fast outlier detection for preview
-        count = _preview_outlier_removal_count_fast(frames_with_scores, factor)
+        count = _preview_outlier_removal_count_fast(frames_with_scores, outlier_sensitivity)
         
         # For statistics, estimate based on removing lowest scores
         all_scores = [frame.get('sharpnessScore', 0) for frame in frames_with_scores]
@@ -313,9 +345,9 @@ def _calculate_cache_key(frames_with_scores: List[Dict[str, Any]], method: str, 
     if method == 'best-n':
         param_str = f"n={params.get('n', 300)}"
     elif method == 'batched':
-        param_str = f"batch_count={params.get('batch_count', 5)}"
+        param_str = f"batch_size={params.get('batch_size', 5)}_batch_buffer={params.get('batch_buffer', 2)}"
     elif method == 'outlier-removal':
-        param_str = f"factor={params.get('factor', 1.5)}"
+        param_str = f"outlier_sensitivity={params.get('outlier_sensitivity', 50)}_outlier_window_size={params.get('outlier_window_size', 15)}"
     
     return f"{method}_{frame_count}_{first_score:.2f}_{last_score:.2f}_{param_str}"
 

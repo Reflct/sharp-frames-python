@@ -8,6 +8,7 @@ import json
 import cv2
 from typing import List, Dict, Any, Optional
 from tqdm import tqdm
+from contextlib import nullcontext
 
 from ..models.frame_data import FrameData
 
@@ -20,9 +21,26 @@ class ImageProcessingError(Exception):
 class FrameSaver:
     """Handles saving selected frames to disk with proper naming conventions."""
     
-    def __init__(self):
-        """Initialize FrameSaver."""
+    def __init__(self, show_progress: bool = True):
+        """Initialize FrameSaver.
+        
+        Args:
+            show_progress: Whether to show progress bars (should be False when running in threads)
+        """
         self.DEFAULT_OUTPUT_FORMAT = "jpg"
+        self.show_progress = show_progress
+    
+    def _get_progress_bar(self, total: int, desc: str):
+        """Get a progress bar or null context based on show_progress setting."""
+        if self.show_progress:
+            return tqdm(total=total, desc=desc)
+        else:
+            return nullcontext()
+    
+    def _update_progress(self, progress_bar, n=1):
+        """Update progress bar if it exists."""
+        if progress_bar and hasattr(progress_bar, 'update'):
+            progress_bar.update(n)
     
     def save_frames(self, selected_frames: List[FrameData], config: Dict[str, Any]) -> bool:
         """
@@ -35,7 +53,14 @@ class FrameSaver:
         Returns:
             True if all frames saved successfully, False otherwise
         """
+        with open("debug_save.log", "a") as f:
+            f.write(f"FrameSaver.save_frames called\n")
+            f.write(f"  selected_frames count: {len(selected_frames)}\n")
+            f.write(f"  config: {config}\n")
+        
         if not selected_frames:
+            with open("debug_save.log", "a") as f:
+                f.write("  No frames to save, returning True\n")
             print("No frames to save.")
             return True
         
@@ -46,8 +71,24 @@ class FrameSaver:
         input_path = config.get('input_path', '')
         force_overwrite = config.get('force_overwrite', False)
         
+        with open("debug_save.log", "a") as f:
+            f.write(f"  output_dir: {output_dir}\n")
+            f.write(f"  output_format: {output_format}\n")
+            f.write(f"  width: {width}\n")
+            f.write(f"  input_type: {input_type}\n")
+            f.write(f"  force_overwrite: {force_overwrite}\n")
+        
         # Ensure output directory exists
-        os.makedirs(output_dir, exist_ok=True)
+        with open("debug_save.log", "a") as f:
+            f.write(f"  Creating output directory: {output_dir}\n")
+        try:
+            os.makedirs(output_dir, exist_ok=True)
+            with open("debug_save.log", "a") as f:
+                f.write(f"  Output directory created/exists\n")
+        except Exception as e:
+            with open("debug_save.log", "a") as f:
+                f.write(f"  ERROR creating output directory: {e}\n")
+            return False
         
         # Check for overwrite if needed
         if not force_overwrite:
@@ -56,7 +97,7 @@ class FrameSaver:
         success_count = 0
         metadata_list = []
         
-        with tqdm(total=len(selected_frames), desc="Saving frames") as progress_bar:
+        with self._get_progress_bar(len(selected_frames), "Saving frames") as progress_bar:
             for i, frame in enumerate(selected_frames):
                 try:
                     # Determine output filename based on input type and frame data
@@ -83,7 +124,7 @@ class FrameSaver:
                     print(f"Error saving frame {frame.path}: {e}")
                     continue
                 
-                progress_bar.update(1)
+                self._update_progress(progress_bar)
         
         # Save metadata
         self._save_metadata(output_dir, metadata_list, config, selected_frames)
@@ -254,12 +295,13 @@ class FrameSaver:
             })
         elif selection_method == 'batched':
             params.update({
-                "batch_count": config.get('batch_count', 5)
+                "batch_size": config.get('batch_size', 5),
+                "batch_buffer": config.get('batch_buffer', 2)
             })
         elif selection_method == 'outlier_removal':
             params.update({
-                "factor": config.get('factor', 1.5),
-                "window_size": config.get('window_size', 15)
+                "outlier_sensitivity": config.get('outlier_sensitivity', 50),
+                "outlier_window_size": config.get('outlier_window_size', 15)
             })
         
         return params
@@ -279,6 +321,12 @@ class FrameSaver:
                             if os.path.isfile(os.path.join(output_dir, f))]
             
             if existing_files:
+                # In non-interactive mode (TUI/thread context), just warn without prompting
+                if not self.show_progress:  # show_progress=False indicates non-interactive context
+                    print(f"Warning: Output directory '{output_dir}' contains {len(existing_files)} files that may be overwritten.")
+                    return
+                
+                # Interactive mode - prompt user
                 print(f"Warning: Output directory '{output_dir}' contains {len(existing_files)} files.")
                 print("Existing files may be overwritten.")
                 
