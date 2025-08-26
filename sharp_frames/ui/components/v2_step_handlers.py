@@ -204,12 +204,12 @@ class OutputDirStepHandler(TwoPhaseStepHandler):
         """Render the output directory step."""
         container.mount(Label("Enter the output directory for selected frames:", classes="question"))
         container.mount(Static("Tip: Directory will be created if it doesn't exist", classes="hint"))
-        container.mount(Input(placeholder="Path to output directory...", id="output-dir"))
+        container.mount(Input(placeholder="Path to output directory...", id="output-dir-input"))
     
     def validate(self, screen) -> bool:
         """Validate output directory."""
         try:
-            input_widget = screen.query_one("#output-dir", Input)
+            input_widget = screen.query_one("#output-dir-input", Input)
             path = input_widget.value.strip()
             
             if not path:
@@ -237,7 +237,7 @@ class OutputDirStepHandler(TwoPhaseStepHandler):
     def get_data(self, screen) -> Dict[str, Any]:
         """Get output directory data."""
         try:
-            input_widget = screen.query_one("#output-dir", Input)
+            input_widget = screen.query_one("#output-dir-input", Input)
             path = input_widget.value.strip()
             return {"output_dir": os.path.expanduser(path)}
         except:

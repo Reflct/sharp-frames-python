@@ -220,6 +220,8 @@ class SelectionScreen(Screen):
             self.action_cancel()
         elif event.button.id == "confirm_button":
             self.action_confirm()
+        elif event.button.id == "start_over_button":
+            self.action_start_over()
     
     def action_cancel(self) -> None:
         """Cancel selection and return to previous screen."""
@@ -228,6 +230,23 @@ class SelectionScreen(Screen):
     def action_confirm(self) -> None:
         """Confirm selection and proceed with saving."""
         self._start_final_processing()
+    
+    def action_start_over(self) -> None:
+        """Reset everything and return to the first step of configuration."""
+        # Clean up any temporary directory from the processor
+        if self.processor and hasattr(self.processor, 'cleanup_temp_directory'):
+            self.processor.cleanup_temp_directory()
+        
+        # Reset configuration screen to first step
+        # The configuration screen should be at index 0 in the screen stack  
+        if len(self.app.screen_stack) >= 3:  # Config, Processing, Selection
+            config_screen = self.app.screen_stack[0]
+            if hasattr(config_screen, 'reset_to_first_step'):
+                config_screen.reset_to_first_step()
+        
+        # Pop both selection and processing screens to return to configuration at step 1
+        self.app.pop_screen()  # Pop selection screen
+        self.app.pop_screen()  # Pop processing screen
     
     def action_help(self) -> None:
         """Show help information."""
@@ -385,6 +404,9 @@ The preview count updates instantly as you make changes, so you can experiment f
                 f.write(f"Config: {final_config}\n")
                 f.write(f"Total frames available: {len(self.extraction_result.frames)}\n")
             
+            # Store the selected count for use in success message
+            selected_count = self.selected_count
+            
             # Show processing indicator
             processing_label = Label("🔄 Processing selection...", classes="processing_indicator")
             self.query_one("#main_content").mount(processing_label)
@@ -407,20 +429,28 @@ The preview count updates instantly as you make changes, so you can experiment f
                 f.write(f"Executor completed. Success: {success}\n")
             
             if success:
-                # Show success message briefly, then return to configuration screen
+                # Show success message
                 processing_label.update("✅ Selection completed successfully!")
-                await asyncio.sleep(2)
+                await asyncio.sleep(1)
                 
-                # Reset configuration screen to first step
-                # The configuration screen should be at index 0 in the screen stack
-                if len(self.app.screen_stack) >= 3:  # Config, Processing, Selection
-                    config_screen = self.app.screen_stack[0]
-                    if hasattr(config_screen, 'reset_to_first_step'):
-                        config_screen.reset_to_first_step()
+                # Remove processing label and show success UI
+                await processing_label.remove()
                 
-                # Pop both selection and processing screens to return to configuration
-                self.app.pop_screen()  # Pop selection screen
-                self.app.pop_screen()  # Pop processing screen
+                # Show success message with Start Over button in horizontal layout
+                success_container = Horizontal(
+                    Container(
+                        Static("✅ Images saved successfully!", classes="success_message"),
+                        Static(f"Saved {selected_count} frames to {final_config['output_dir']}", classes="success_details"),
+                        classes="success_text_container"
+                    ),
+                    Button("Start Over", id="start_over_button", variant="primary"),
+                    id="success_container",
+                    classes="success_container"
+                )
+                await self.query_one("#main_content").mount(success_container)
+                
+                # Focus the start over button
+                self.query_one("#start_over_button", Button).focus()
             else:
                 # Show error and re-enable UI
                 processing_label.update("❌ Selection failed. Please try again.")

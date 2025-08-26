@@ -123,9 +123,10 @@ class TwoPhaseSharpFramesApp(App):
         if self._looks_like_file_path(pasted_text):
             self.log.info(f"Detected potential file path paste: {pasted_text}")
             if self._route_file_path_to_input(pasted_text):
-                return  # Successfully routed, don't pass to default handler
+                event.stop()  # Prevent default paste behavior
+                return
         
-        super().on_paste(event)
+        # Let the event propagate normally to the focused widget
     
     def _looks_like_file_path(self, text: str) -> bool:
         """Determine if pasted text looks like a file path."""
@@ -161,6 +162,11 @@ class TwoPhaseSharpFramesApp(App):
                 try:
                     input_widget = current_screen.query_one(f"#{target_input_id}", Input)
                     sanitized_path = sanitize_path_input(file_path)
+                    
+                    # For output_dir, if a file is dragged, use its parent directory
+                    if target_input_id == "output-dir-input" and os.path.isfile(sanitized_path):
+                        sanitized_path = os.path.dirname(sanitized_path)
+                    
                     input_widget.value = sanitized_path
                     input_widget.focus()
                     self.log.info(f"Routed file path to {target_input_id}: {sanitized_path}")
@@ -184,8 +190,9 @@ class TwoPhaseSharpFramesApp(App):
         # Route based on current step and path type
         if current_step == "input_path":
             return "input-path"  # Always route to input path field
-        elif current_step == "output_dir" and is_directory:
-            return "output-dir"  # Route directories to output dir field
+        elif current_step == "output_dir":
+            # For output dir, accept both directories and any path (user might drag a file to get its directory)
+            return "output-dir-input"  # Route to output dir field
         
         return None  # No suitable target
     

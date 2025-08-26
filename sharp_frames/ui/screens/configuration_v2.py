@@ -15,6 +15,8 @@ from textual.widgets import (
 from textual.screen import Screen
 from textual.binding import Binding
 
+from ..utils import sanitize_path_input
+
 from ..constants import UIElementIds, InputTypes
 from ..components.v2_step_handlers import (
     InputTypeStepHandler,
@@ -90,6 +92,7 @@ class TwoPhaseConfigurationForm(Screen):
         yield Static(ascii_title, classes="title")
         yield Static("Two-Phase Mode - Interactive Selection", classes="subtitle")
         yield Static("", id="step-info", classes="step-info")
+        yield Static("", id="step-description", classes="step-description")
         
         with Container(id="main-container"):
             yield Container(id="step-container")
@@ -119,6 +122,21 @@ class TwoPhaseConfigurationForm(Screen):
             self._back_step()
         elif event.button.id == UIElementIds.CANCEL_BTN:
             self.action_cancel()
+    
+    def on_input_changed(self, event: Input.Changed) -> None:
+        """Handle input changes and sanitize file paths."""
+        input_id = event.input.id
+        
+        # Path inputs that need sanitization
+        path_inputs = ['input-path', 'output-dir-input']
+        
+        if input_id in path_inputs:
+            current_value = event.value
+            sanitized_value = sanitize_path_input(current_value)
+            
+            # Only update if sanitization changed the value
+            if sanitized_value != current_value:
+                event.input.value = sanitized_value
     
     def show_current_step(self) -> None:
         """Display the current step of the wizard - same pattern as legacy."""

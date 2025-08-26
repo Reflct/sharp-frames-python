@@ -64,6 +64,44 @@ Button {
     margin: 0 1;
 }
 
+/* Primary button styling - white text on blue background, no highlight */
+Button.-primary {
+    background: $primary;
+    color: white;
+    text-style: not reverse;
+}
+
+Button.-primary:hover {
+    background: $primary-lighten-1;
+    color: white;
+    text-style: not reverse;
+}
+
+Button.-primary:focus {
+    background: $primary;
+    color: white;
+    text-style: not reverse;
+}
+
+/* Success button styling - white text on green background, no highlight */
+Button.-success {
+    background: $success;
+    color: white;
+    text-style: not reverse;
+}
+
+Button.-success:hover {
+    background: $success-lighten-1;
+    color: white;
+    text-style: not reverse;
+}
+
+Button.-success:focus {
+    background: $success;
+    color: white;
+    text-style: not reverse;
+}
+
 #main-container {
     padding: 1;
     height: 1fr;
@@ -373,5 +411,48 @@ Input.-invalid {
 .action_buttons Button {
     margin: 0 2;
     min-width: 15;
+}
+
+/* Success container for after save completion */
+.success_container {
+    layout: horizontal;
+    align: center middle;
+    padding: 1 2;
+    margin: 1 0;
+    border: solid $success;
+    height: auto;
+}
+
+.success_text_container {
+    layout: vertical;
+    padding: 0 2 0 0;
+}
+
+.success_message {
+    text-align: left;
+    text-style: bold;
+    color: $success;
+    margin: 0;
+    height: 1;
+}
+
+.success_details {
+    text-align: left;
+    color: $text;
+    margin: 0;
+    height: 1;
+}
+
+#start_over_button {
+    margin: 0 0 0 2;
+    min-width: 12;
+}
+
+.processing_indicator {
+    text-align: center;
+    margin: 2 0;
+    padding: 1 2;
+    color: $primary;
+    text-style: bold;
 }
 """ 
