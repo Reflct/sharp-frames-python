@@ -22,10 +22,14 @@ class TwoPhaseSharpFramesApp(App):
     TITLE = "Sharp Frames - Two Phase Mode - by Reflct.app"
     
     def __init__(self, **kwargs):
-        """Initialize app with macOS compatibility fixes."""
-        # Force specific terminal driver for macOS
+        """Initialize app with cross-platform compatibility fixes."""
+        # Set appropriate terminal driver based on platform
         if os.name == 'posix':  # macOS/Linux
             os.environ['TEXTUAL_DRIVER'] = 'linux'
+        elif os.name == 'nt':  # Windows
+            # Let Textual auto-detect the best Windows driver
+            # Don't force a specific driver on Windows as it can cause issues
+            pass
         
         # Track spurious escape sequences
         self._last_escape_time = 0
@@ -35,15 +39,23 @@ class TwoPhaseSharpFramesApp(App):
         super().__init__(**kwargs)
     
     def setup_signal_handlers(self):
-        """Setup signal handlers for macOS compatibility."""
+        """Setup signal handlers for cross-platform compatibility."""
         def signal_handler(signum, frame):
             self.log.info(f"Received signal {signum} in main app, ignoring to prevent premature exit")
         
-        # Handle common signals that might cause issues on macOS
+        # Handle common signals - only use signals available on current platform
         signals_to_handle = []
-        for signal_attr in ['SIGTERM', 'SIGINT', 'SIGUSR1', 'SIGUSR2']:
+        
+        # Always available signals
+        for signal_attr in ['SIGTERM', 'SIGINT']:
             if hasattr(signal, signal_attr):
                 signals_to_handle.append(getattr(signal, signal_attr))
+        
+        # Unix/Linux specific signals (not available on Windows)
+        if os.name == 'posix':
+            for signal_attr in ['SIGUSR1', 'SIGUSR2', 'SIGHUP', 'SIGPIPE']:
+                if hasattr(signal, signal_attr):
+                    signals_to_handle.append(getattr(signal, signal_attr))
         
         for sig in signals_to_handle:
             try:
@@ -183,9 +195,12 @@ class TwoPhaseSharpFramesApp(App):
         """Determine which input field should receive the file path."""
         current_step = config_screen.get_current_step_name()
         
-        # Check what type of path this is
+        # Check what type of path this is (Windows-safe)
         is_directory = os.path.isdir(file_path) if os.path.exists(file_path) else file_path.endswith(('/', '\\'))
         is_video = any(file_path.lower().endswith(ext) for ext in ['.mp4', '.avi', '.mov', '.mkv', '.webm', '.m4v'])
+        
+        # Normalize path separators for consistent handling
+        file_path = os.path.normpath(file_path)
         
         # Route based on current step and path type
         if current_step == "input_path":

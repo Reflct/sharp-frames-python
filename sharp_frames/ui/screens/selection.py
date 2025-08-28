@@ -3,7 +3,7 @@ Interactive selection screen for Sharp Frames TUI.
 """
 
 import asyncio
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from textual.app import ComposeResult
 from textual.containers import Container, Horizontal
 from textual.widgets import (
@@ -13,9 +13,228 @@ from textual.screen import Screen
 from textual.binding import Binding
 from textual.message import Message
 from textual.reactive import reactive
+from textual.widget import Widget
+from textual.strip import Strip
+from rich.segment import Segment
+from rich.style import Style
 
 from ...processing.tui_processor import TUIProcessor
-from ...models.frame_data import ExtractionResult
+from ...models.frame_data import ExtractionResult, FrameData
+
+
+class SharpnessChart(Widget):
+    """Bar chart widget to display sharpness scores and selection status."""
+    
+    DEFAULT_CSS = """
+    SharpnessChart {
+        height: 12;
+        width: 100%;
+        border: solid $primary;
+        margin: 1 0;
+    }
+    """
+    
+    def __init__(self, frames: List[FrameData], selected_indices: set = None, max_frames: int = 100, **kwargs):
+        super().__init__(**kwargs)
+        self.frames = frames[:max_frames]  # Only show first 100 frames
+        self.selected_indices = selected_indices or set()
+        self.max_frames = max_frames
+        
+        # Calculate min and max sharpness for normalization
+        if self.frames:
+            scores = [f.sharpness_score for f in self.frames]
+            self.min_score = min(scores)
+            self.max_score = max(scores)
+            self.score_range = self.max_score - self.min_score if self.max_score > self.min_score else 1
+        else:
+            self.min_score = 0
+            self.max_score = 1
+            self.score_range = 1
+    
+    def update_selection(self, selected_indices: set):
+        """Update the selection status and refresh the chart."""
+        self.selected_indices = selected_indices
+        self.refresh()
+    
+    def render_line(self, y: int) -> "Strip":
+        """Render a single line of the chart."""
+        from textual.strip import Strip
+        
+        width = self.size.width
+        height = self.size.height - 2  # Account for border
+        
+        if not self.frames or width < 10 or height < 1:
+            return Strip([Segment(" " * width)])
+        
+        # First line is the title
+        if y == 0:
+            title = "Frame selection - first 100"
+            padding = (width - len(title)) // 2
+            return Strip([
+                Segment(" " * padding),
+                Segment(title, Style(color="#3190FF", bold=True)),
+                Segment(" " * (width - padding - len(title)))
+            ])
+        
+        # Chart content starts from line 1
+        chart_y = y - 1
+        chart_height = height - 1  # Reserve first line for title
+        
+        # Calculate bar dimensions
+        num_frames = min(len(self.frames), 100)  # Max 100 frames
+        bar_width = 1  # Each bar is 1 character wide
+        gap_width = 1  # 1 character gap between bars
+        
+        segments = []
+        
+        for i in range(num_frames):
+            frame = self.frames[i]
+            
+            # Normalize sharpness score to chart height
+            normalized_score = (frame.sharpness_score - self.min_score) / self.score_range
+            bar_height = int(normalized_score * chart_height)
+            
+            # Determine if we should draw the bar at this y position
+            # chart_y=0 is top of chart, chart_height-1 is bottom
+            should_draw = (chart_height - 1 - chart_y) < bar_height
+            
+            # Choose color based on selection status
+            if frame.index in self.selected_indices:
+                color = Style(color="white", bold=True)
+            else:
+                color = Style(color="#666666")  # Light grey for unselected
+            
+            # Draw the bar
+            if should_draw:
+                segments.append(Segment("█", color))
+            else:
+                segments.append(Segment(" "))
+            
+            # Add gap after bar (except for the last one)
+            if i < num_frames - 1:
+                segments.append(Segment(" "))
+        
+        # Calculate total width used
+        total_used = num_frames * bar_width + (num_frames - 1) * gap_width
+        
+        # Fill remaining space
+        remaining = width - total_used
+        if remaining > 0:
+            segments.append(Segment(" " * remaining))
+        
+        return Strip(segments)
+
+
+class InputWithControls(Widget):
+    """Input field with increment/decrement controls."""
+    
+    DEFAULT_CSS = """
+    InputWithControls {
+        height: 3;
+        layout: horizontal;
+        margin: 0 0 1 0;
+    }
+    
+    InputWithControls Input {
+        width: 20;
+        margin: 0 1 0 0;
+        height: 3;
+    }
+    
+    InputWithControls .increment-controls {
+        width: 8;
+        layout: horizontal;
+        height: 3;
+    }
+    
+    InputWithControls .increment-btn,
+    InputWithControls .decrement-btn {
+        height: 3;
+        width: 3;
+        margin: 0;
+        padding: 0;
+        min-width: 3;
+        min-height: 3;
+        max-height: 3;
+        max-width: 3;
+        content-align: center middle;
+        text-align: center;
+    }
+    
+    InputWithControls .decrement-btn {
+        margin-right: 2;
+    }
+    """
+    
+    def __init__(self, value: str = "", input_id: str = "", min_value: int = 0, max_value: int = 10000, step: int = 1, **kwargs):
+        super().__init__(**kwargs)
+        self.input_id = input_id
+        self.min_value = min_value
+        self.max_value = max_value
+        self.step = step
+        self._value = value
+    
+    def compose(self) -> ComposeResult:
+        """Compose the input with increment/decrement buttons."""
+        yield Input(value=self._value, id=self.input_id)
+        with Container(classes="increment-controls"):
+            yield Button(label="-", classes="decrement-btn", id=f"{self.input_id}_dec", variant="primary")
+            yield Button(label="+", classes="increment-btn", id=f"{self.input_id}_inc", variant="primary")
+    
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Handle increment/decrement button presses."""
+        button_id = event.button.id
+        if button_id and button_id.endswith("_inc"):
+            self._increment()
+        elif button_id and button_id.endswith("_dec"):
+            self._decrement()
+    
+    def _increment(self) -> None:
+        """Increment the input value."""
+        input_widget = self.query_one(f"#{self.input_id}", Input)
+        try:
+            current_value = int(input_widget.value) if input_widget.value else 0
+            new_value = min(current_value + self.step, self.max_value)
+            input_widget.value = str(new_value)
+            # Trigger the input changed event manually
+            input_widget.post_message(Input.Changed(input_widget, str(new_value)))
+        except ValueError:
+            # If current value is invalid, set to minimum
+            input_widget.value = str(self.min_value)
+            input_widget.post_message(Input.Changed(input_widget, str(self.min_value)))
+    
+    def _decrement(self) -> None:
+        """Decrement the input value."""
+        input_widget = self.query_one(f"#{self.input_id}", Input)
+        try:
+            current_value = int(input_widget.value) if input_widget.value else 0
+            new_value = max(current_value - self.step, self.min_value)
+            input_widget.value = str(new_value)
+            # Trigger the input changed event manually
+            input_widget.post_message(Input.Changed(input_widget, str(new_value)))
+        except ValueError:
+            # If current value is invalid, set to minimum
+            input_widget.value = str(self.min_value)
+            input_widget.post_message(Input.Changed(input_widget, str(self.min_value)))
+    
+    @property
+    def value(self) -> str:
+        """Get the current input value."""
+        try:
+            input_widget = self.query_one(f"#{self.input_id}", Input)
+            return input_widget.value
+        except:
+            return self._value
+    
+    @value.setter
+    def value(self, new_value: str) -> None:
+        """Set the input value."""
+        self._value = new_value
+        try:
+            input_widget = self.query_one(f"#{self.input_id}", Input)
+            input_widget.value = new_value
+        except:
+            pass
 
 
 class SelectionScreen(Screen):
@@ -30,7 +249,7 @@ class SelectionScreen(Screen):
     
     # Reactive attributes for real-time updates
     selected_count = reactive(0)
-    selected_method = reactive("best_n")
+    selected_method = reactive("batched")
     
     class SelectionPreview(Message):
         """Message sent when selection preview is updated."""
@@ -55,9 +274,10 @@ class SelectionScreen(Screen):
         self.config = config
         
         # Selection state
-        self.current_method = "best_n"
-        self.current_parameters = {"n": 300, "min_buffer": 3}  # Default parameters for best_n
+        self.current_method = "batched"
+        self.current_parameters = {"batch_size": 5, "batch_buffer": 2}  # Default parameters for batched
         self.preview_task = None  # For debouncing preview updates
+        self.selected_indices = set()  # Track which frames are selected
         
         # Method definitions with default parameters - matching legacy application exactly
         self.method_definitions = {
@@ -97,9 +317,18 @@ class SelectionScreen(Screen):
         
         # Main container with all content
         with Container(id="main_content"):
-            # Title section
-            yield Static("Select Frames", classes="main_title")
-            yield Static(f"Choose from {total_frames:,} analyzed frames", classes="subtitle")
+            # Title section - single line with left and right text
+            with Horizontal(id="title_section", classes="title_section"):
+                yield Static("Select Frames", classes="title_left")
+                yield Static(f"Choose from {total_frames:,} analyzed frames", classes="title_right")
+            
+            # Sharpness chart - shows first 100 frames
+            yield SharpnessChart(
+                self.extraction_result.frames,
+                selected_indices=self.selected_indices,
+                max_frames=100,
+                id="sharpness_chart"
+            )
             
             # Controls section - method and parameters side by side
             with Horizontal(id="controls_section", classes="controls"):
@@ -108,7 +337,7 @@ class SelectionScreen(Screen):
                     yield Label("Selection Method", classes="control_label")
                     yield Select(
                         options=[(info["name"], key) for key, info in self.method_definitions.items()],
-                        value=self.current_method,
+                        value="batched",
                         id="method_select"
                     )
                     yield Static(self.method_definitions[self.current_method]["description"], 
@@ -118,18 +347,24 @@ class SelectionScreen(Screen):
                 with Container(id="parameter_container", classes="control_group"):
                     yield Label("Parameters", classes="control_label")
                     with Container(id="parameter_inputs", classes="parameter_inputs"):
-                        # Initial parameters for best_n method (default)
-                        yield Label("Number of frames:", classes="param_label")
-                        yield Input(
-                            value="300",
-                            id="param_best_n_n",
-                            classes="param_input"
+                        # Initial parameters for batched method (default)
+                        yield Label("Frames per batch:", classes="param_label")
+                        yield InputWithControls(
+                            value="5",
+                            input_id="param_batched_batch_size",
+                            min_value=1,
+                            max_value=100,
+                            step=1,
+                            classes="param_input_with_controls"
                         )
-                        yield Label("Minimum distance between frames:", classes="param_label")
-                        yield Input(
-                            value="3",
-                            id="param_best_n_min_buffer",
-                            classes="param_input"
+                        yield Label("Frames to skip between batches:", classes="param_label")
+                        yield InputWithControls(
+                            value="2",
+                            input_id="param_batched_batch_buffer",
+                            min_value=0,
+                            max_value=50,
+                            step=1,
+                            classes="param_input_with_controls"
                         )
             
             # Action buttons inside main content for better positioning
@@ -313,11 +548,28 @@ The preview count updates instantly as you make changes, so you can experiment f
                 widgets_to_mount.append(label)
                 
                 if param_info["type"] in ["int", "float"]:
-                    # Create input widget
-                    input_widget = Input(
+                    # Create input widget with controls
+                    min_val = param_info.get("min", 0)
+                    max_val = param_info.get("max", 10000)
+                    step_val = 1
+                    
+                    # Adjust step size based on parameter type and range
+                    if param_name == "outlier_sensitivity":
+                        step_val = 5  # Percentage values work better with 5% steps
+                    elif max_val <= 100:
+                        step_val = 1  # Small ranges use step of 1
+                    elif max_val <= 1000:
+                        step_val = 10  # Medium ranges use step of 10
+                    else:
+                        step_val = 50  # Large ranges use step of 50
+                    
+                    input_widget = InputWithControls(
                         value=str(current_value),
-                        id=input_id,
-                        classes="param_input"
+                        input_id=input_id,
+                        min_value=min_val,
+                        max_value=max_val,
+                        step=step_val,
+                        classes="param_input_with_controls"
                     )
                     widgets_to_mount.append(input_widget)
                     param_count += 1
@@ -332,7 +584,12 @@ The preview count updates instantly as you make changes, so you can experiment f
             
             # Focus the first input after mounting is complete
             if first_input:
-                first_input.focus()
+                # Focus the actual input field within the InputWithControls widget
+                try:
+                    input_field = first_input.query_one(Input)
+                    input_field.focus()
+                except:
+                    first_input.focus()
                     
         except Exception as e:
             self.app.log.error(f"Error updating parameter inputs: {e}")
@@ -370,6 +627,23 @@ The preview count updates instantly as you make changes, so you can experiment f
     def _update_preview_display(self, count: int) -> None:
         """Update the preview display with new count in the button."""
         self.selected_count = count
+        
+        # Update selected indices for the chart
+        # Get which frames would be selected with current settings
+        try:
+            # Use the actual selection method to get the selected frames
+            selected_frames = self.processor.selector.select_frames(
+                self.extraction_result.frames,
+                self.current_method,
+                **self.current_parameters
+            )
+            self.selected_indices = {frame.index for frame in selected_frames}
+            
+            # Update the chart
+            chart = self.query_one("#sharpness_chart", SharpnessChart)
+            chart.update_selection(self.selected_indices)
+        except Exception as e:
+            self.app.log.error(f"Error updating chart selection: {e}")
         
         # Update the action button to show what will happen
         confirm_btn = self.query_one("#confirm_button", Button)

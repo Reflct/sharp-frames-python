@@ -338,21 +338,35 @@ Input.-invalid {
     height: auto;
 }
 
-.main_title {
-    text-align: center;
+/* Title section - horizontal layout */
+.title_section {
+    height: 1;
+    margin: 0 0 1 0;
+}
+
+.title_left {
     text-style: bold;
     color: $primary;
-    margin: 0 0 1 0;
+    text-align: left;
     height: 1;
+    width: 1fr;
 }
 
-.subtitle {
-    text-align: center;
+.title_right {
     color: $text-muted;
-    margin: 0 0 1 0;
+    text-align: right;
     height: 1;
+    width: 1fr;
 }
 
+/* Sharpness chart */
+SharpnessChart {
+    height: 12;
+    width: 100%;
+    border: solid $primary;
+    margin: 1 0;
+    background: $surface-lighten-1;
+}
 
 /* Controls section takes remaining space */
 .controls {
@@ -362,7 +376,7 @@ Input.-invalid {
 
 .control_group {
     width: 1fr;
-    padding: 1;
+    padding: 1 2 1 1;
     border: solid $surface;
     margin: 0 1;
     height: auto;
@@ -399,6 +413,49 @@ Input.-invalid {
     margin: 0 0 1 0;
     height: 3;
     width: 100%;
+}
+
+/* Input with controls styles */
+.param_input_with_controls {
+    margin: 0 0 1 0;
+    height: 3;
+    width: 100%;
+}
+
+InputWithControls {
+    height: 3;
+    layout: horizontal;
+    margin: 0 0 1 0;
+}
+
+InputWithControls Input {
+    width: 20;
+    margin: 0 1 0 0;
+    height: 3;
+}
+
+InputWithControls .increment-controls {
+    width: 8;
+    layout: horizontal;
+    height: 3;
+}
+
+InputWithControls .increment-btn,
+InputWithControls .decrement-btn {
+    height: 3 !important;
+    width: 3 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    min-width: 3 !important;
+    min-height: 3 !important;
+    max-height: 3 !important;
+    max-width: 3 !important;
+    content-align: center middle;
+    text-align: center;
+}
+
+InputWithControls .decrement-btn {
+    margin-right: 2 !important;
 }
 
 /* Action buttons inside main content */

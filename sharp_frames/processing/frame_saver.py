@@ -78,6 +78,9 @@ class FrameSaver:
             f.write(f"  input_type: {input_type}\n")
             f.write(f"  force_overwrite: {force_overwrite}\n")
         
+        # Normalize output directory path for cross-platform compatibility
+        output_dir = os.path.normpath(output_dir)
+        
         # Ensure output directory exists
         with open("debug_save.log", "a") as f:
             f.write(f"  Creating output directory: {output_dir}\n")
@@ -185,6 +188,10 @@ class FrameSaver:
             True if saved successfully, False otherwise
         """
         try:
+            # Normalize paths for cross-platform compatibility
+            src_path = os.path.normpath(src_path)
+            dst_path = os.path.normpath(dst_path)
+            
             # Handle resizing for directory input (video frames already resized during extraction)
             if width > 0 and input_type == 'directory':
                 # Load and resize image

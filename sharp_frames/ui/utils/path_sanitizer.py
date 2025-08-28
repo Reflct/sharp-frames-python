@@ -132,7 +132,14 @@ class PathSanitizer:
         changes = []
         
         # Don't unescape if this looks like a Windows path
-        if re.match(r'^[A-Za-z]:\\', path):
+        # Check for various Windows path patterns
+        windows_path_patterns = [
+            r'^[A-Za-z]:[/\\]',      # C:/ or C:\
+            r'^\\\\[^\\]+\\',        # UNC path \\server\
+            r'^[A-Za-z]:\\'          # C:\ specifically
+        ]
+        
+        if any(re.match(pattern, path) for pattern in windows_path_patterns):
             return path, changes
         
         # Find all escape sequences that aren't part of Windows paths

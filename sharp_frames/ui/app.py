@@ -4,8 +4,10 @@ Main Sharp Frames Textual application.
 
 import signal
 import os
+import sys
 import time
 import re
+import logging
 from textual.app import App
 from textual.events import Key, Paste
 from textual.widgets import Input
@@ -23,19 +25,14 @@ class SharpFramesApp(App):
     
     def __init__(self, **kwargs):
         """Initialize app with macOS compatibility fixes."""
-        # Solution 2: Force specific terminal driver for macOS
-        if os.name == 'posix':  # macOS/Linux
-            os.environ['TEXTUAL_DRIVER'] = 'linux'
-        
-        # Track spurious escape sequences
-        self._last_escape_time = 0
-        self._escape_count = 0
+        # Track for preventing spurious cancellations
         self._last_action_time = 0
         self._original_signal_handlers = {}
+        
         super().__init__(**kwargs)
     
     def setup_signal_handlers(self):
-        """Solution 1: Setup signal handlers for macOS compatibility.
+        """Setup signal handlers for macOS compatibility.
         
         Note: These handlers only affect the main app process, not subprocesses.
         We store original handlers so we can restore them when running subprocesses.
@@ -87,7 +84,7 @@ class SharpFramesApp(App):
         self.setup_signal_handlers()
     
     def action_cancel(self) -> None:
-        """Override cancel action to prevent spurious exits from ANSI sequences."""
+        """Override cancel action to prevent spurious exits."""
         # Check if we're in a screen that wants to handle its own cancellation
         current_screen = self.screen_stack[-1] if self.screen_stack else None
         
@@ -101,12 +98,7 @@ class SharpFramesApp(App):
         
         current_time = time.time()
         
-        # If we just had escape sequences recently, this is likely spurious
-        if current_time - self._last_escape_time < 2.0:  # Within 2 seconds of escape detection
-            self.log.info(f"Blocking cancel action - likely triggered by spurious escape sequence (time since escape: {current_time - self._last_escape_time:.2f}s)")
-            return
-        
-        # If we've had multiple recent actions, likely spurious
+        # Prevent rapid cancel actions that might be spurious
         if current_time - self._last_action_time < 0.5:  # Multiple actions within 500ms
             self.log.info("Blocking cancel action - too many rapid actions detected")
             return
@@ -118,35 +110,10 @@ class SharpFramesApp(App):
         self.exit("cancelled")
     
     def on_key(self, event: Key) -> None:
-        """Solution 4: Handle and filter problematic key events."""
-        current_time = time.time()
-        
+        """Handle and filter problematic key events."""
         # Allow Ctrl+C to pass through if it's legitimate
         if event.key == 'ctrl+c':
             self.log.info("Ctrl+C detected - allowing through for cancellation")
-            return  # Let it propagate normally
-        
-        # Check for escape sequences that are part of ANSI/mouse events
-        if event.key == 'escape':
-            self.log.info(f"Escape key detected - count: {self._escape_count + 1}, time_since_last: {current_time - self._last_escape_time:.2f}s")
-            
-            # If this is likely a spurious escape (part of ANSI sequence)
-            if current_time - self._last_escape_time < 0.1:  # Less than 100ms
-                self.log.info("Filtering out spurious escape sequence")
-                event.stop()  # Stop event propagation completely
-                return
-            
-            self._last_escape_time = current_time
-            self._escape_count += 1
-            
-            # Only allow escape if it seems like a genuine user action
-            if self._escape_count > 3:  # Too many escapes, likely spurious
-                self.log.info("Too many escape sequences detected, filtering")
-                event.stop()  # Stop event propagation completely
-                return
-            
-            # Allow legitimate escape keys to pass through
-            self.log.info("Allowing legitimate escape key through")
             return  # Let it propagate normally
         
         # Filter out ANSI escape sequences that corrupt input
@@ -297,11 +264,7 @@ class SharpFramesApp(App):
     
     def on_mount(self) -> None:
         """Start with the configuration form and setup signal handlers."""
-        try:
-            self.setup_signal_handlers()
-            self.theme = "flexoki"
-            self.push_screen(ConfigurationForm())
-            self.log.info("App mounted successfully - monitoring for spurious escape sequences")
-        except Exception as e:
-            self.log.error(f"Error during mount: {e}")
-            self.notify(f"Error starting app: {e}", severity="error") 
+        self.setup_signal_handlers()
+        self.theme = "flexoki"
+        self.push_screen(ConfigurationForm())
+        self.log.info("App mounted successfully")

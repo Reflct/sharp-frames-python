@@ -271,9 +271,12 @@ class FrameExtractor:
     def _get_video_info(self, video_path: str) -> Dict[str, Any]:
         """Get video information using FFprobe."""
         try:
+            # Use proper executable name based on platform
+            ffprobe_executable = 'ffprobe.exe' if os.name == 'nt' else 'ffprobe'
+            
             cmd = [
-                'ffprobe', '-v', 'quiet', '-print_format', 'json',
-                '-show_format', '-show_streams', video_path
+                ffprobe_executable, '-v', 'quiet', '-print_format', 'json',
+                '-show_format', '-show_streams', os.path.normpath(video_path)
             ]
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
             
@@ -311,12 +314,15 @@ class FrameExtractor:
         
         vf_string = ",".join(vf_filters)
         
-        # Build FFmpeg command
+        # Use proper executable name based on platform
+        ffmpeg_executable = 'ffmpeg.exe' if os.name == 'nt' else 'ffmpeg'
+        
+        # Build FFmpeg command - normalize paths for Windows
         cmd = [
-            'ffmpeg', '-i', video_path,
+            ffmpeg_executable, '-i', os.path.normpath(video_path),
             '-vf', vf_string,
             '-y',  # Overwrite output files
-            output_pattern
+            os.path.normpath(output_pattern)
         ]
         
         try:
@@ -340,7 +346,19 @@ class FrameExtractor:
             import threading
             import time
             
-            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            # Windows-specific process creation flags
+            creation_flags = 0
+            if os.name == 'nt':
+                # On Windows, create new process group and hide console window
+                creation_flags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
+            
+            process = subprocess.Popen(
+                cmd, 
+                stdout=subprocess.PIPE, 
+                stderr=subprocess.PIPE, 
+                text=True,
+                creationflags=creation_flags if os.name == 'nt' else 0
+            )
             
             # Monitor progress by counting extracted files
             last_file_count = 0
