@@ -9,9 +9,9 @@ import os
 import tempfile
 import shutil
 
-from sharp_frames.ui.app_v2 import TwoPhaseSharpFramesApp
-from sharp_frames.ui.screens.configuration_v2 import TwoPhaseConfigurationForm
-from sharp_frames.ui.screens.processing_v2 import TwoPhaseProcessingScreen
+from sharp_frames.ui.app import SharpFramesApp
+from sharp_frames.ui.screens.configuration import ConfigurationForm
+from sharp_frames.ui.screens.processing import ProcessingScreen
 from sharp_frames.ui.screens.selection import SelectionScreen
 from sharp_frames.models.frame_data import FrameData
 
@@ -46,11 +46,11 @@ class TestUIIntegration:
             shutil.rmtree(self.temp_dir)
     
     def test_two_phase_app_initialization(self):
-        """Test that TwoPhaseSharpFramesApp initializes correctly."""
-        app = TwoPhaseSharpFramesApp()
+        """Test that SharpFramesApp initializes correctly."""
+        app = SharpFramesApp()
         
         assert app.CSS is not None
-        assert app.TITLE == "Sharp Frames - Two Phase Mode - by Reflct.app"
+        assert app.TITLE == "Sharp Frames - by Reflct.app"
         assert hasattr(app, '_last_escape_time')
         assert hasattr(app, '_escape_count')
         assert hasattr(app, '_last_action_time')
@@ -198,7 +198,7 @@ class TestUIIntegration:
     
     def test_file_path_detection(self):
         """Test file path detection in app."""
-        app = TwoPhaseSharpFramesApp()
+        app = SharpFramesApp()
         
         # Test various path formats
         assert app._looks_like_file_path("/absolute/path/video.mp4") == True
@@ -214,7 +214,7 @@ class TestUIIntegration:
     
     def test_screen_stack_management(self):
         """Test proper screen stack management logic."""
-        app = TwoPhaseSharpFramesApp()
+        app = SharpFramesApp()
         
         # Test that the action_cancel method exists and has the expected behavior patterns
         assert hasattr(app, 'action_cancel')
@@ -236,7 +236,7 @@ class TestUIIntegration:
     
     def test_signal_handler_management(self):
         """Test signal handler setup and restoration."""
-        app = TwoPhaseSharpFramesApp()
+        app = SharpFramesApp()
         
         # Test setup
         app.setup_signal_handlers()

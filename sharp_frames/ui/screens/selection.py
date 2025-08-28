@@ -370,7 +370,7 @@ class SelectionScreen(Screen):
             # Action buttons inside main content for better positioning
             with Horizontal(id="action_buttons", classes="action_buttons"):
                 yield Button("← Back", id="back_button", variant="default")
-                yield Button(f"Save {initial_count:,} Images", id="confirm_button", variant="success")
+                yield Button(f"Save {initial_count:,} Images", id="confirm_button", variant="primary")
         
         yield Footer()
     
@@ -671,12 +671,6 @@ The preview count updates instantly as you make changes, so you can experiment f
     async def _process_final_selection(self, final_config: Dict[str, Any]) -> None:
         """Process the final selection and saving."""
         try:
-            with open("debug_save.log", "a") as f:
-                f.write(f"=== SAVE PROCESS STARTED ===\n")
-                f.write(f"Method: {self.current_method}\n")
-                f.write(f"Parameters: {self.current_parameters}\n")
-                f.write(f"Config: {final_config}\n")
-                f.write(f"Total frames available: {len(self.extraction_result.frames)}\n")
             
             # Store the selected count for use in success message
             selected_count = self.selected_count
@@ -684,9 +678,6 @@ The preview count updates instantly as you make changes, so you can experiment f
             # Show processing indicator
             processing_label = Label("🔄 Processing selection...", classes="processing_indicator")
             self.query_one("#main_content").mount(processing_label)
-            
-            with open("debug_save.log", "a") as f:
-                f.write("Starting executor call...\n")
             
             # Run the final selection (this is CPU intensive, so we run it in a thread)
             # Note: run_in_executor doesn't support keyword arguments, so we use a lambda
@@ -698,9 +689,6 @@ The preview count updates instantly as you make changes, so you can experiment f
                     **self.current_parameters
                 )
             )
-            
-            with open("debug_save.log", "a") as f:
-                f.write(f"Executor completed. Success: {success}\n")
             
             if success:
                 # Show success message
@@ -734,11 +722,6 @@ The preview count updates instantly as you make changes, so you can experiment f
                 self.query_one("#method_select", Select).disabled = False
                 
         except Exception as e:
-            with open("debug_save.log", "a") as f:
-                f.write(f"EXCEPTION in SelectionScreen._process_final_selection: {e}\n")
-                f.write(f"Exception type: {type(e).__name__}\n")
-                import traceback
-                f.write(f"Traceback:\n{traceback.format_exc()}\n")
             
             self.app.log.error(f"Error during final processing: {e}")
             # Re-enable UI on error

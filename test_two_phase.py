@@ -1,8 +1,8 @@
 #!/usr/bin/env python
-"""Test script for two-phase Sharp Frames app."""
+"""Test script for Sharp Frames app."""
 
-from sharp_frames.ui.app_v2 import TwoPhaseSharpFramesApp
+from sharp_frames.ui.app import SharpFramesApp
 
 if __name__ == "__main__":
-    app = TwoPhaseSharpFramesApp()
+    app = SharpFramesApp()
     app.run()

@@ -104,45 +104,26 @@ class FrameSelector:
         Returns:
             List of selected FrameData objects
         """
-        with open("debug_save.log", "a") as f:
-            f.write(f"FrameSelector.select_frames called\n")
-            f.write(f"  method: {method}\n")
-            f.write(f"  params: {params}\n")
-            f.write(f"  frames count: {len(frames)}\n")
-        
         if not frames:
-            with open("debug_save.log", "a") as f:
-                f.write("  No frames provided, returning empty list\n")
             return []
         
         if method == 'best_n':
             n = params.get('n', 300)
             min_buffer = params.get('min_buffer', 3)
-            with open("debug_save.log", "a") as f:
-                f.write(f"  Using best_n method: n={n}, min_buffer={min_buffer}\n")
             result = self._select_best_n_frames(frames, n, min_buffer)
             
         elif method == 'batched':
             batch_size = params.get('batch_size', 5)
             batch_buffer = params.get('batch_buffer', 2)
-            with open("debug_save.log", "a") as f:
-                f.write(f"  Using batched method: batch_size={batch_size}, batch_buffer={batch_buffer}\n")
             result = self._select_batched_frames(frames, batch_size, batch_buffer)
         
         elif method == 'outlier_removal':
             outlier_sensitivity = params.get('outlier_sensitivity', 50)
             outlier_window_size = params.get('outlier_window_size', 15)
-            with open("debug_save.log", "a") as f:
-                f.write(f"  Using outlier_removal method: sensitivity={outlier_sensitivity}, window_size={outlier_window_size}\n")
             result = self._select_outlier_removal_frames(frames, outlier_sensitivity, outlier_window_size)
             
         else:
-            with open("debug_save.log", "a") as f:
-                f.write(f"  ERROR: Unsupported selection method: {method}\n")
             raise ValueError(f"Unsupported selection method: {method}")
-        
-        with open("debug_save.log", "a") as f:
-            f.write(f"  FrameSelector.select_frames returning {len(result)} frames\n")
         
         return result
     

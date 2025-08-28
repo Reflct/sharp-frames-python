@@ -53,14 +53,8 @@ class FrameSaver:
         Returns:
             True if all frames saved successfully, False otherwise
         """
-        with open("debug_save.log", "a") as f:
-            f.write(f"FrameSaver.save_frames called\n")
-            f.write(f"  selected_frames count: {len(selected_frames)}\n")
-            f.write(f"  config: {config}\n")
         
         if not selected_frames:
-            with open("debug_save.log", "a") as f:
-                f.write("  No frames to save, returning True\n")
             print("No frames to save.")
             return True
         
@@ -71,26 +65,15 @@ class FrameSaver:
         input_path = config.get('input_path', '')
         force_overwrite = config.get('force_overwrite', False)
         
-        with open("debug_save.log", "a") as f:
-            f.write(f"  output_dir: {output_dir}\n")
-            f.write(f"  output_format: {output_format}\n")
-            f.write(f"  width: {width}\n")
-            f.write(f"  input_type: {input_type}\n")
-            f.write(f"  force_overwrite: {force_overwrite}\n")
         
         # Normalize output directory path for cross-platform compatibility
         output_dir = os.path.normpath(output_dir)
         
         # Ensure output directory exists
-        with open("debug_save.log", "a") as f:
-            f.write(f"  Creating output directory: {output_dir}\n")
         try:
             os.makedirs(output_dir, exist_ok=True)
-            with open("debug_save.log", "a") as f:
-                f.write(f"  Output directory created/exists\n")
         except Exception as e:
-            with open("debug_save.log", "a") as f:
-                f.write(f"  ERROR creating output directory: {e}\n")
+            print(f"Error creating output directory: {e}")
             return False
         
         # Check for overwrite if needed

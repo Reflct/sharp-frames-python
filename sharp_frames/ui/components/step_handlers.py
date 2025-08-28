@@ -1,13 +1,11 @@
 """
-Step handlers for configuration wizard.
-
-This module contains specialized classes for handling different steps
-of the configuration wizard, breaking down the large ConfigurationForm
-into smaller, focused components.
+Step handlers for TwoPhaseConfigurationForm.
+These handlers follow the interface expected by the v2 configuration form.
 """
 
-from typing import Dict, Any
-from textual.containers import Container
+import os
+from typing import Dict, Any, Optional
+from textual.containers import Container, Horizontal, Vertical
 from textual.widgets import Label, Input, Select, RadioSet, RadioButton, Checkbox, Static
 
 from ..constants import UIElementIds, InputTypes
@@ -18,347 +16,580 @@ from .validators import (
     ImageDirectoryValidator,
     OutputDirectoryValidator
 )
-from ..utils.path_sanitizer import PathSanitizer
 
 
-class BaseStepHandler:
-    """Base class for configuration step handlers."""
+class TwoPhaseStepHandler:
+    """Base class for two-phase configuration step handlers."""
     
-    def __init__(self, config_data: Dict[str, Any]):
-        self.config_data = config_data
+    def __init__(self):
+        pass
     
-    def create_step(self, container: Container) -> None:
-        """Create the step UI. Must be implemented by subclasses."""
+    def get_title(self) -> str:
+        """Get the step title."""
         raise NotImplementedError
     
-    def validate_step(self) -> bool:
-        """Validate the current step. Override if needed."""
+    def get_description(self) -> str:
+        """Get the step description."""
+        raise NotImplementedError
+    
+    def render(self, screen, container: Container) -> None:
+        """Render the step content into the container."""
+        raise NotImplementedError
+    
+    def validate(self, screen) -> bool:
+        """Validate the current step."""
         return True
     
-    def save_step_data(self, container: Container) -> bool:
-        """Save data from the step. Override if needed."""
-        return True
+    def get_data(self, screen) -> Dict[str, Any]:
+        """Get data from the step."""
+        return {}
+    
+    def set_data(self, screen, data: Any) -> None:
+        """Set data for the step."""
+        pass
+    
+    def get_help_text(self) -> str:
+        """Get help text for this step."""
+        return ""
 
 
-class InputTypeStepHandler(BaseStepHandler):
+class InputTypeStepHandler(TwoPhaseStepHandler):
     """Handler for input type selection step."""
     
-    def create_step(self, container: Container) -> None:
-        """Create the input type selection step."""
+    def get_title(self) -> str:
+        return "Input Type Selection"
+    
+    def get_description(self) -> str:
+        return "Choose what type of input you want to process"
+    
+    def render(self, screen, container: Container) -> None:
+        """Render the input type selection step."""
         container.mount(Label("What type of input do you want to process?", classes="question"))
         
-        # Create radio buttons and mount them
-        radio_set = RadioSet(id=UIElementIds.INPUT_TYPE_RADIO)
-        video_radio = RadioButton("Video file", value=True, id=UIElementIds.VIDEO_OPTION)
-        video_dir_radio = RadioButton("Video directory", id=UIElementIds.VIDEO_DIRECTORY_OPTION)
-        dir_radio = RadioButton("Image directory", id=UIElementIds.DIRECTORY_OPTION)
-        
-        # Mount radio set first, then add children
-        container.mount(radio_set)
-        radio_set.mount(video_radio)
-        radio_set.mount(video_dir_radio)
-        radio_set.mount(dir_radio)
-        
-        # Add description label
-        description_label = Label("Extract and select the sharpest frames of a single video", 
-                                classes="hint", id="input-type-description")
-        container.mount(description_label)
-        
-        # Set current value if exists
-        if "input_type" in self.config_data:
-            current_type = self.config_data["input_type"]
-            video_radio.value = current_type == InputTypes.VIDEO
-            video_dir_radio.value = current_type == InputTypes.VIDEO_DIRECTORY
-            dir_radio.value = current_type == InputTypes.DIRECTORY
-            
-            # Update description based on current selection
-            if current_type == InputTypes.VIDEO:
-                description_label.update("Extract and select the sharpest frames of a single video")
-            elif current_type == InputTypes.VIDEO_DIRECTORY:
-                description_label.update("Extract and select the sharpest frames of all videos in a folder")
-            elif current_type == InputTypes.DIRECTORY:
-                description_label.update("Select the sharpest images from a folder")
+        # Create radio buttons for input types
+        container.mount(
+            RadioSet(
+                RadioButton("Single video file", id="video", value=True),
+                RadioButton("Directory of video files", id="video_directory"),
+                RadioButton("Directory of images", id="image_directory"),
+                id="input-type-selection"
+            )
+        )
+    
+    def validate(self, screen) -> bool:
+        """Validate input type selection."""
+        try:
+            radio_set = screen.query_one("#input-type-selection", RadioSet)
+            return radio_set.pressed_index is not None
+        except:
+            return False
+    
+    def get_data(self, screen) -> Dict[str, Any]:
+        """Get selected input type."""
+        try:
+            radio_set = screen.query_one("#input-type-selection", RadioSet)
+            if radio_set.pressed_index is not None:
+                # Map the pressed index to the input type
+                # Use "directory" for image directories to match SharpFrames expectations
+                input_types = ["video", "video_directory", "directory"]
+                return {"input_type": input_types[radio_set.pressed_index]}
+        except Exception as e:
+            screen.app.log.error(f"Error getting input type data: {e}")
+        return {}
+    
+    def set_data(self, screen, data: Any) -> None:
+        """Set input type selection."""
+        if not data:
+            return
+        try:
+            input_type = data.get("input_type", "video")
+            radio_set = screen.query_one("#input-type-selection", RadioSet)
+            # Map the input type to the index
+            # Handle both "image_directory" and "directory" for compatibility
+            if input_type == "directory":
+                input_type = "image_directory"  # Convert for display
+            input_types = ["video", "video_directory", "image_directory"]
+            if input_type in input_types:
+                radio_set.pressed_index = input_types.index(input_type)
+        except Exception as e:
+            screen.app.log.error(f"Error setting input type data: {e}")
 
 
-class InputPathStepHandler(BaseStepHandler):
+class InputPathStepHandler(TwoPhaseStepHandler):
     """Handler for input path selection step."""
     
-    def create_step(self, container: Container) -> None:
-        """Create the input path step."""
-        input_type = self.config_data.get("input_type", InputTypes.VIDEO)
-        
-        # Create appropriate validator based on input type
-        if input_type == InputTypes.VIDEO:
-            container.mount(Label("Enter the path to your video file:", classes="question"))
-            placeholder = "e.g., /path/to/video.mp4"
-            validator = VideoFileValidator(must_exist=True)
-        elif input_type == InputTypes.VIDEO_DIRECTORY:
-            container.mount(Label("Enter the path to your video directory:", classes="question"))
-            placeholder = "e.g., /path/to/videos/"
-            validator = VideoDirectoryValidator(must_exist=True)
-        else:
-            container.mount(Label("Enter the path to your image directory:", classes="question"))
-            placeholder = "e.g., /path/to/images/"
-            validator = ImageDirectoryValidator(must_exist=True)
-        
-        input_widget = Input(
-            placeholder=placeholder,
-            id=UIElementIds.INPUT_PATH_FIELD,
-            value=self.config_data.get("input_path", ""),
-            validators=[validator]
-        )
-        container.mount(input_widget)
-        
-        # Add helpful text about automatic cleaning
-        helper_label = Label("Quotes will be automatically removed", classes="hint")
-        container.mount(helper_label)
-        
-        input_widget.focus()
+    def get_title(self) -> str:
+        return "Input Path"
     
+    def get_description(self) -> str:
+        return "Enter the path to your input file or directory"
+    
+    def render(self, screen, container: Container) -> None:
+        """Render the input path step."""
+        input_type = screen.config_data.get("input_type", "video")
+        
+        if input_type == "video":
+            container.mount(Label("Enter the path to your video file:", classes="question"))
+            container.mount(Static("Tip: You can drag and drop a video file here", classes="hint"))
+        elif input_type == "video_directory":
+            container.mount(Label("Enter the path to your video directory:", classes="question"))
+            container.mount(Static("Tip: You can drag and drop a directory here", classes="hint"))
+        else:  # directory (image directory)
+            container.mount(Label("Enter the path to your image directory:", classes="question"))
+            container.mount(Static("Tip: You can drag and drop a directory here", classes="hint"))
+        
+        container.mount(Input(placeholder="Path to input...", id="input-path"))
+    
+    def validate(self, screen) -> bool:
+        """Validate input path."""
+        try:
+            input_widget = screen.query_one("#input-path", Input)
+            path = input_widget.value.strip()
+            
+            if not path:
+                screen.query_one("#step-description").update("Please enter an input path")
+                return False
+            
+            # Expand user path
+            expanded_path = os.path.expanduser(path)
+            
+            if not os.path.exists(expanded_path):
+                screen.query_one("#step-description").update("Path does not exist")
+                return False
+            
+            input_type = screen.config_data.get("input_type", "video")
+            
+            if input_type == "video":
+                if not os.path.isfile(expanded_path):
+                    screen.query_one("#step-description").update("Path must be a video file")
+                    return False
+                # Could add video format validation here
+            else:  # directory types
+                if not os.path.isdir(expanded_path):
+                    screen.query_one("#step-description").update("Path must be a directory")
+                    return False
+            
+            return True
+        except Exception as e:
+            screen.query_one("#step-description").update(f"Validation error: {str(e)}")
+            return False
+    
+    def get_data(self, screen) -> Dict[str, Any]:
+        """Get input path data."""
+        try:
+            input_widget = screen.query_one("#input-path", Input)
+            path = input_widget.value.strip()
+            return {"input_path": os.path.expanduser(path)}
+        except:
+            return {}
+    
+    def set_data(self, screen, data: Any) -> None:
+        """Set input path."""
+        if not data:
+            return
+        try:
+            input_path = data.get("input_path", "")
+            input_widget = screen.query_one("#input-path", Input)
+            input_widget.value = input_path
+        except:
+            pass
 
 
-
-class OutputDirStepHandler(BaseStepHandler):
+class OutputDirStepHandler(TwoPhaseStepHandler):
     """Handler for output directory selection step."""
     
-    def create_step(self, container: Container) -> None:
-        """Create the output directory step."""
-        container.mount(Label("Where should the selected frames be saved?", classes="question"))
-        input_widget = Input(
-            placeholder="e.g., /path/to/output",
-            id="output-dir-field",
-            value=self.config_data.get("output_dir", ""),
-            validators=[OutputDirectoryValidator(create_if_missing=True)]
-        )
-        container.mount(input_widget)
-        
-        # Add helpful text about automatic cleaning
-        helper_label = Label("Quotes will be automatically removed", classes="hint")
-        container.mount(helper_label)
-        
-        input_widget.focus()
+    def get_title(self) -> str:
+        return "Output Directory"
     
+    def get_description(self) -> str:
+        return "Choose where to save the selected frames"
+    
+    def render(self, screen, container: Container) -> None:
+        """Render the output directory step."""
+        container.mount(Label("Enter the output directory for selected frames:", classes="question"))
+        container.mount(Static("Tip: Directory will be created if it doesn't exist", classes="hint"))
+        container.mount(Input(placeholder="Path to output directory...", id="output-dir-input"))
+    
+    def validate(self, screen) -> bool:
+        """Validate output directory."""
+        try:
+            input_widget = screen.query_one("#output-dir-input", Input)
+            path = input_widget.value.strip()
+            
+            if not path:
+                screen.query_one("#step-description").update("Please enter an output directory")
+                return False
+            
+            # Expand user path
+            expanded_path = os.path.expanduser(path)
+            
+            # Check if parent directory exists and is writable
+            parent_dir = os.path.dirname(expanded_path)
+            if parent_dir and not os.path.exists(parent_dir):
+                screen.query_one("#step-description").update("Parent directory does not exist")
+                return False
+            
+            if parent_dir and not os.access(parent_dir, os.W_OK):
+                screen.query_one("#step-description").update("Cannot write to parent directory")
+                return False
+            
+            return True
+        except Exception as e:
+            screen.query_one("#step-description").update(f"Validation error: {str(e)}")
+            return False
+    
+    def get_data(self, screen) -> Dict[str, Any]:
+        """Get output directory data."""
+        try:
+            input_widget = screen.query_one("#output-dir-input", Input)
+            path = input_widget.value.strip()
+            return {"output_dir": os.path.expanduser(path)}
+        except:
+            return {}
+    
+    def set_data(self, screen, data: Any) -> None:
+        """Set output directory."""
+        if not data:
+            return
+        try:
+            output_dir = data.get("output_dir", "")
+            input_widget = screen.query_one("#output-dir", Input)
+            input_widget.value = output_dir
+        except:
+            pass
 
 
-
-class FpsStepHandler(BaseStepHandler):
+class FpsStepHandler(TwoPhaseStepHandler):
     """Handler for FPS selection step."""
     
-    def create_step(self, container: Container) -> None:
-        """Create the FPS selection step."""
-        input_type = self.config_data.get("input_type", InputTypes.VIDEO)
-        if input_type == InputTypes.VIDEO_DIRECTORY:
-            question_text = "How many frames per second should be extracted from each video?"
-        else:
-            question_text = "How many frames per second should be extracted from the video?"
+    def get_title(self) -> str:
+        return "Frame Extraction Rate"
+    
+    def get_description(self) -> str:
+        return "Set the frame extraction rate (frames per second)"
+    
+    def render(self, screen, container: Container) -> None:
+        """Render the FPS step."""
+        container.mount(Label("At what rate should frames be extracted?", classes="question"))
+        container.mount(Static("Higher values extract more frames but take longer to process", classes="hint"))
+        
+        # Add line break and better layout
+        container.mount(Static(""))  # Line break
+        container.mount(Label("FPS (frames per second):", classes="field-label"))
+        container.mount(Input(value="10", placeholder="10", id="fps-input", classes="field-input"))
+    
+    def validate(self, screen) -> bool:
+        """Validate FPS value."""
+        try:
+            input_widget = screen.query_one("#fps-input", Input)
+            fps_str = input_widget.value.strip()
             
-        container.mount(Label(question_text, classes="question"))
-        input_widget = Input(
-            value=str(self.config_data.get("fps", 10)),
-            validators=[IntRangeValidator(min_value=1, max_value=60)],
-            id="fps-field"
-        )
-        container.mount(input_widget)
-        container.mount(Label("(Recommended: 5-15 fps)", classes="hint"))
-        input_widget.focus()
-
-
-class SelectionMethodStepHandler(BaseStepHandler):
-    """Handler for selection method step."""
-    
-    def create_step(self, container: Container) -> None:
-        """Create the selection method step."""
-        container.mount(Label("Which frame selection method would you like to use?", classes="question"))
-        select_widget = Select([
-            ("Best N frames - Choose a specific number of frames", "best-n"),
-            ("Batched selection - Best frame from each batch", "batched"),
-            ("Outlier removal - Remove the blurriest frames", "outlier-removal")
-        ], value=self.config_data.get("selection_method", "best-n"), id="selection-method-field")
-        container.mount(select_widget)
-        
-        # Add description label
-        current_method = self.config_data.get("selection_method", "best-n")
-        description_text = self._get_method_description(current_method)
-        description_label = Label(description_text, classes="hint", id="selection-method-description")
-        container.mount(description_label)
-    
-    def _get_method_description(self, method: str) -> str:
-        """Get description text for a selection method."""
-        descriptions = {
-            "best-n": "Selects the N sharpest frames from the entire video with minimum spacing between frames",
-            "batched": "Divides frames into batches and selects the sharpest frame from each batch for even distribution",
-            "outlier-removal": "Analyzes frame sharpness and removes unusually blurry frames to keep the clearest ones"
-        }
-        return descriptions.get(method, "")
-
-
-class MethodParamsStepHandler(BaseStepHandler):
-    """Handler for method-specific parameters step."""
-    
-    def create_step(self, container: Container) -> None:
-        """Create the method-specific parameters step."""
-        method = self.config_data.get("selection_method", "best-n")
-        
-        if method == "best-n":
-            self._create_best_n_params(container)
-        elif method == "batched":
-            self._create_batched_params(container)
-        elif method == "outlier-removal":
-            self._create_outlier_params(container)
-    
-    def _create_best_n_params(self, container: Container) -> None:
-        """Create best-n method parameters."""
-        container.mount(Label("Best-N Method Configuration:", classes="question"))
-        container.mount(Label("Number of frames to select:"))
-        input1 = Input(
-            value=str(self.config_data.get("num_frames", 300)),
-            validators=[IntRangeValidator(min_value=1)],
-            id="param1"
-        )
-        container.mount(input1)
-        container.mount(Label("Minimum distance between frames:"))
-        input2 = Input(
-            value=str(self.config_data.get("min_buffer", 3)),
-            validators=[IntRangeValidator(min_value=0)],
-            id="param2"
-        )
-        container.mount(input2)
-        input1.focus()
-    
-    def _create_batched_params(self, container: Container) -> None:
-        """Create batched method parameters."""
-        container.mount(Label("Batched Method Configuration:", classes="question"))
-        container.mount(Label("Batch size (frames per batch):"))
-        input1 = Input(
-            value=str(self.config_data.get("batch_size", 5)),
-            validators=[IntRangeValidator(min_value=1)],
-            id="param1"
-        )
-        container.mount(input1)
-        container.mount(Label("Frames to skip between batches:"))
-        input2 = Input(
-            value=str(self.config_data.get("batch_buffer", 2)),
-            validators=[IntRangeValidator(min_value=0)],
-            id="param2"
-        )
-        container.mount(input2)
-        input1.focus()
-    
-    def _create_outlier_params(self, container: Container) -> None:
-        """Create outlier removal method parameters."""
-        container.mount(Label("Outlier Removal Configuration:", classes="question"))
-        container.mount(Label("Window size for comparison:"))
-        input1 = Input(
-            value=str(self.config_data.get("outlier_window_size", 15)),
-            validators=[IntRangeValidator(min_value=3, max_value=30)],
-            id="param1"
-        )
-        container.mount(input1)
-        container.mount(Label("Sensitivity (0-100, higher = more aggressive):"))
-        input2 = Input(
-            value=str(self.config_data.get("outlier_sensitivity", 50)),
-            validators=[IntRangeValidator(min_value=0, max_value=100)],
-            id="param2"
-        )
-        container.mount(input2)
-        input1.focus()
-
-
-class OutputFormatStepHandler(BaseStepHandler):
-    """Handler for output format step."""
-    
-    def create_step(self, container: Container) -> None:
-        """Create the output format step."""
-        container.mount(Label("What format should the output images be saved in?", classes="question"))
-        select_widget = Select([
-            ("JPEG (smaller file size)", "jpg"),
-            ("PNG (better quality)", "png")
-        ], value=self.config_data.get("output_format", "jpg"), id="output-format-field")
-        container.mount(select_widget)
-
-
-class WidthStepHandler(BaseStepHandler):
-    """Handler for width/resize step."""
-    
-    def create_step(self, container: Container) -> None:
-        """Create the width step."""
-        container.mount(Label("Do you want to resize the output images?", classes="question"))
-        input_widget = Input(
-            value=str(self.config_data.get("width", 0)),
-            validators=[IntRangeValidator(min_value=0)],
-            id="width-field"
-        )
-        container.mount(input_widget)
-        container.mount(Label("(Enter 0 for no resizing, or width in pixels)", classes="hint"))
-        input_widget.focus()
-
-
-class ForceOverwriteStepHandler(BaseStepHandler):
-    """Handler for force overwrite step."""
-    
-    def create_step(self, container: Container) -> None:
-        """Create the force overwrite step."""
-        container.mount(Label("Should existing files be overwritten without confirmation?", classes="question"))
-        checkbox = Checkbox(
-            "Yes, overwrite existing files",
-            value=self.config_data.get("force_overwrite", False),
-            id="force-overwrite-field"
-        )
-        container.mount(checkbox)
-
-
-class ConfirmStepHandler(BaseStepHandler):
-    """Handler for confirmation step."""
-    
-    def create_step(self, container: Container) -> None:
-        """Create the confirmation step."""
-        container.mount(Label("Review your configuration:", classes="question"))
-        
-        # Show summary
-        summary_text = self._build_config_summary()
-        container.mount(Static(summary_text, classes="summary"))
-        container.mount(Label("Press 'Process' to start, or 'Back' to make changes.", classes="hint"))
-    
-    def _build_config_summary(self) -> str:
-        """Build a summary of the current configuration."""
-        lines = []
-        
-        input_type = self.config_data.get("input_type", InputTypes.VIDEO)
-        lines.append(f"Input Type: {input_type.title()}")
-        lines.append(f"Input Path: {self.config_data.get('input_path', 'Not set')}")
-        lines.append(f"Output Directory: {self.config_data.get('output_dir', 'Not set')}")
-        
-        if input_type in [InputTypes.VIDEO, InputTypes.VIDEO_DIRECTORY]:
-            fps_label = "FPS (per video)" if input_type == InputTypes.VIDEO_DIRECTORY else "FPS"
-            lines.append(f"{fps_label}: {self.config_data.get('fps', 10)}")
-        
-        method = self.config_data.get("selection_method", "best-n")
-        lines.append(f"Selection Method: {method}")
-        
-        if method == "best-n":
-            lines.append(f"  Number of frames: {self.config_data.get('num_frames', 300)}")
-            lines.append(f"  Minimum buffer: {self.config_data.get('min_buffer', 3)}")
-        elif method == "batched":
-            lines.append(f"  Batch size: {self.config_data.get('batch_size', 5)}")
-            lines.append(f"  Batch buffer: {self.config_data.get('batch_buffer', 2)}")
-        elif method == "outlier-removal":
-            lines.append(f"  Window size: {self.config_data.get('outlier_window_size', 15)}")
-            lines.append(f"  Sensitivity: {self.config_data.get('outlier_sensitivity', 50)}")
-        
-        # Only show output format and resize options for non-directory modes
-        if input_type != InputTypes.DIRECTORY:
-            lines.append(f"Output Format: {self.config_data.get('output_format', 'jpg').upper()}")
+            if not fps_str:
+                screen.query_one("#step-description").update("Please enter an FPS value")
+                return False
             
-            width = self.config_data.get('width', 0)
-            if width > 0:
-                lines.append(f"Resize Width: {width}px")
-            else:
-                lines.append("Resize: No resizing")
+            fps = float(fps_str)
+            if fps <= 0:
+                screen.query_one("#step-description").update("FPS must be greater than 0")
+                return False
+            
+            if fps > 60:
+                screen.query_one("#step-description").update("FPS should not exceed 60")
+                return False
+            
+            return True
+        except ValueError:
+            screen.query_one("#step-description").update("FPS must be a valid number")
+            return False
+        except Exception as e:
+            screen.query_one("#step-description").update(f"Validation error: {str(e)}")
+            return False
+    
+    def get_data(self, screen) -> Dict[str, Any]:
+        """Get FPS data."""
+        try:
+            input_widget = screen.query_one("#fps-input", Input)
+            fps = float(input_widget.value.strip())
+            return {"fps": fps}
+        except:
+            return {"fps": 10}  # Default value
+    
+    def set_data(self, screen, data: Any) -> None:
+        """Set FPS value."""
+        if not data:
+            return
+        try:
+            fps = data.get("fps", 10)
+            input_widget = screen.query_one("#fps-input", Input)
+            input_widget.value = str(fps)
+        except:
+            pass
+
+
+class OutputFormatStepHandler(TwoPhaseStepHandler):
+    """Handler for output format selection step."""
+    
+    def get_title(self) -> str:
+        return "Output Format"
+    
+    def get_description(self) -> str:
+        return "Choose the image format for saved frames"
+    
+    def render(self, screen, container: Container) -> None:
+        """Render the output format step."""
+        container.mount(Label("What image format should be used for saved frames?", classes="question"))
+        container.mount(Static("Choose the best format for your needs", classes="hint"))
+        
+        # Add line break and better layout
+        container.mount(Static(""))  # Line break
+        container.mount(Label("Image format:", classes="field-label"))
+        
+        formats = [
+            ("jpg", "JPEG (smaller file size, good quality)"),
+            ("png", "PNG (larger file size, lossless quality)")
+        ]
+        
+        options = [(desc, fmt) for fmt, desc in formats]
+        container.mount(Select(options, value="jpg", id="format-select", classes="field-select"))
+    
+    def validate(self, screen) -> bool:
+        """Validate output format."""
+        return True  # Select widget always has a valid value
+    
+    def get_data(self, screen) -> Dict[str, Any]:
+        """Get output format data."""
+        try:
+            select_widget = screen.query_one("#format-select", Select)
+            return {"output_format": select_widget.value}
+        except:
+            return {"output_format": "jpg"}  # Default value
+    
+    def set_data(self, screen, data: Any) -> None:
+        """Set output format."""
+        if not data:
+            return
+        try:
+            format_value = data.get("output_format", "jpg")
+            select_widget = screen.query_one("#format-select", Select)
+            select_widget.value = format_value
+        except:
+            pass
+
+
+class WidthStepHandler(TwoPhaseStepHandler):
+    """Handler for width/resize selection step."""
+    
+    def get_title(self) -> str:
+        return "Image Width"
+    
+    def get_description(self) -> str:
+        return "Set output image width (0 for original size)"
+    
+    def render(self, screen, container: Container) -> None:
+        """Render the width step."""
+        container.mount(Label("What should be the width of output images?", classes="question"))
+        container.mount(Static("Enter 0 to keep original size, or specify width in pixels", classes="hint"))
+        
+        # Add line break and better layout
+        container.mount(Static(""))  # Line break
+        container.mount(Label("Width (in pixels):", classes="field-label"))
+        container.mount(Input(value="0", placeholder="0", id="width-input", classes="field-input"))
+    
+    def validate(self, screen) -> bool:
+        """Validate width value."""
+        try:
+            input_widget = screen.query_one("#width-input", Input)
+            width_str = input_widget.value.strip()
+            
+            if not width_str:
+                screen.query_one("#step-description").update("Please enter a width value")
+                return False
+            
+            width = int(width_str)
+            if width < 0:
+                screen.query_one("#step-description").update("Width cannot be negative")
+                return False
+            
+            if width > 0 and width < 100:
+                screen.query_one("#step-description").update("Width should be at least 100 pixels if not 0")
+                return False
+            
+            return True
+        except ValueError:
+            screen.query_one("#step-description").update("Width must be a valid integer")
+            return False
+        except Exception as e:
+            screen.query_one("#step-description").update(f"Validation error: {str(e)}")
+            return False
+    
+    def get_data(self, screen) -> Dict[str, Any]:
+        """Get width data."""
+        try:
+            input_widget = screen.query_one("#width-input", Input)
+            width = int(input_widget.value.strip())
+            return {"width": width}
+        except:
+            return {"width": 0}  # Default value
+    
+    def set_data(self, screen, data: Any) -> None:
+        """Set width value."""
+        if not data:
+            return
+        try:
+            width = data.get("width", 0)
+            input_widget = screen.query_one("#width-input", Input)
+            input_widget.value = str(width)
+        except:
+            pass
+
+
+class ForceOverwriteStepHandler(TwoPhaseStepHandler):
+    """Handler for force overwrite option step."""
+    
+    def get_title(self) -> str:
+        return "Overwrite Settings"
+    
+    def get_description(self) -> str:
+        return "Choose whether to overwrite existing files"
+    
+    def render(self, screen, container: Container) -> None:
+        """Render the force overwrite step."""
+        container.mount(Label("How should existing files be handled?", classes="question"))
+        container.mount(Static("Choose whether to skip confirmation prompts", classes="hint"))
+        
+        # Add line break and better layout
+        container.mount(Static(""))  # Line break
+        container.mount(Label("File handling:", classes="field-label"))
+        container.mount(Checkbox("Force overwrite existing files without asking", id="force-overwrite", classes="field-checkbox"))
+        container.mount(Static(""))  # Line break
+        container.mount(Static("If unchecked, you'll be prompted before overwriting files", classes="hint"))
+    
+    def validate(self, screen) -> bool:
+        """Validate force overwrite setting."""
+        return True  # Checkbox always has a valid value
+    
+    def get_data(self, screen) -> Dict[str, Any]:
+        """Get force overwrite data."""
+        try:
+            checkbox = screen.query_one("#force-overwrite", Checkbox)
+            return {"force_overwrite": checkbox.value}
+        except:
+            return {"force_overwrite": False}  # Default value
+    
+    def set_data(self, screen, data: Any) -> None:
+        """Set force overwrite setting."""
+        if not data:
+            return
+        try:
+            force_overwrite = data.get("force_overwrite", False)
+            checkbox = screen.query_one("#force-overwrite", Checkbox)
+            checkbox.value = force_overwrite
+        except:
+            pass
+
+
+class ConfirmStepHandler(TwoPhaseStepHandler):
+    """Handler for configuration confirmation step."""
+    
+    def get_title(self) -> str:
+        return "Configuration Summary"
+    
+    def get_description(self) -> str:
+        return "Review your configuration before starting processing"
+    
+    def render(self, screen, container: Container) -> None:
+        """Render the confirmation step."""
+        container.mount(Label("Please review your configuration:", classes="question"))
+        container.mount(Static(""))  # Line break
+        
+        # Show configuration summary
+        config = screen.config_data
+        
+        # Build summary items with better formatting
+        summary_items = []
+        
+        # Input configuration
+        summary_items.append(Label("Input Configuration", classes="summary-section-title"))
+        summary_items.append(Static(f"  Type: {config.get('input_type', 'Unknown')}"))
+        summary_items.append(Static(f"  Path: {config.get('input_path', 'Not set')}"))
+        summary_items.append(Static(""))  # Section break
+        
+        # Output configuration
+        summary_items.append(Label("Output Configuration", classes="summary-section-title"))
+        summary_items.append(Static(f"  Directory: {config.get('output_dir', 'Not set')}"))
+        summary_items.append(Static(f"  Format: {config.get('output_format', 'jpg').upper()}"))
+        
+        width = config.get('width', 0)
+        if width == 0:
+            summary_items.append(Static("  Width: Original size"))
         else:
-            lines.append("Output Format: Preserve original formats")
-            lines.append("Resize: Preserve original dimensions")
+            summary_items.append(Static(f"  Width: {width} pixels"))
+        summary_items.append(Static(""))  # Section break
         
-        overwrite = self.config_data.get('force_overwrite', False)
-        lines.append(f"Force Overwrite: {'Yes' if overwrite else 'No'}")
+        # Processing configuration
+        summary_items.append(Label("Processing Configuration", classes="summary-section-title"))
         
-        return "\n".join(lines) 
+        # Show FPS only for video inputs
+        input_type = config.get('input_type', '')
+        if input_type in ['video', 'video_directory']:
+            summary_items.append(Static(f"  Frame Rate: {config.get('fps', 10)} FPS"))
+        
+        overwrite = config.get('force_overwrite', False)
+        summary_items.append(Static(f"  Overwrite Files: {'Yes' if overwrite else 'No'}"))
+        
+        container.mount(Vertical(*summary_items, classes="summary"))
+        container.mount(Static(""))  # Line break
+        container.mount(Static("Click 'Start Processing' to begin frame extraction and analysis.", classes="hint"))
+    
+    def validate(self, screen) -> bool:
+        """Validate complete configuration."""
+        return True  # Final validation happens in the form itself
+    
+    def get_data(self, screen) -> Dict[str, Any]:
+        """Get confirmation data."""
+        return {}  # No additional data from confirmation step
+    
+    def set_data(self, screen, data: Any) -> None:
+        """Set confirmation data."""
+        pass  # Nothing to set for confirmation step
+
+
+class ValidationHelpers:
+    """Helper class for validation functions."""
+    
+    @staticmethod
+    def validate_path(path: str, must_exist: bool = True) -> bool:
+        """Validate a file path."""
+        if not path:
+            return False
+        
+        expanded_path = os.path.expanduser(path)
+        
+        if must_exist and not os.path.exists(expanded_path):
+            return False
+        
+        return True
+    
+    @staticmethod
+    def validate_fps(fps_str: str) -> tuple[bool, Optional[float]]:
+        """Validate FPS value."""
+        try:
+            fps = float(fps_str)
+            if fps <= 0 or fps > 60:
+                return False, None
+            return True, fps
+        except ValueError:
+            return False, None
+    
+    @staticmethod
+    def validate_width(width_str: str) -> tuple[bool, Optional[int]]:
+        """Validate width value."""
+        try:
+            width = int(width_str)
+            if width < 0:
+                return False, None
+            if width > 0 and width < 100:
+                return False, None
+            return True, width
+        except ValueError:
+            return False, None

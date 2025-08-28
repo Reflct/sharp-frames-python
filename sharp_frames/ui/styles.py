@@ -128,30 +128,90 @@ Button.-success:focus {
 
 Input {
     margin: 0;
+    border: solid $surface;
+}
+
+Input:focus {
+    border: solid $primary;
 }
 
 Select {
     margin: 0;
+    border: solid $surface;
+}
+
+Select:focus {
+    border: solid $primary;
 }
 
 RadioSet {
     margin: 0;
+    padding: 1 2;
+    background: $surface;
+    border: solid $surface;
+}
+
+RadioSet:focus {
+    border: solid $primary;
 }
 
 Checkbox {
     margin: 0;
+    padding: 1 2;
+    background: $surface;
+    border: solid $surface;
+}
+
+Checkbox:focus {
+    border: solid $primary;
 }
 
 Label {
     margin: 0;
 }
 
-/* Input field enhancements */
+/* Field styles for v2 configuration steps */
+.field-label {
+    margin: 1 0 0 0;
+    text-style: bold;
+    color: $text;
+}
+
+.field-input {
+    width: 30;
+    margin: 0 0 1 0;
+}
+
+.field-select {
+    width: 50;
+    margin: 0 0 1 0;
+}
+
+.field-checkbox {
+    margin: 0 0 1 0;
+}
+
+.summary-section-title {
+    text-style: bold;
+    color: $primary;
+    margin: 1 0 0 0;
+}
+
+
+/* Input field enhancements - validation states */
 Input.-valid {
     border: solid $success;
 }
 
 Input.-invalid {
+    border: solid $error;
+}
+
+Select.-valid {
+    border: solid $success;
+}
+
+Select.-invalid {
     border: solid $error;
 }
 

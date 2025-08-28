@@ -1,12 +1,12 @@
 """
-Processing screen for Sharp Frames UI.
+Updated processing screen for Sharp Frames UI with two-phase support.
 """
 
 import threading
 import logging
 import traceback
 import os
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 from textual.app import ComposeResult
 from textual.containers import Container
@@ -16,13 +16,14 @@ from textual.binding import Binding
 
 from ..constants import WorkerNames, ProcessingPhases
 from ..utils import ErrorContext
+from .selection import SelectionScreen
 
 # Set up debug logging
 logger = logging.getLogger(__name__)
 
 
-class ProcessingScreen(Screen):
-    """Screen shown during processing."""
+class TwoPhaseProcessingScreen(Screen):
+    """Screen for two-phase processing (extraction/analysis → interactive selection)."""
     
     BINDINGS = [
         Binding("ctrl+c", "cancel", "Cancel Processing"),
@@ -32,19 +33,19 @@ class ProcessingScreen(Screen):
         super().__init__()
         self.config = config
         self.processor = None
+        self.extraction_result = None
         
         # Thread-safe state management
-        self._state_lock = threading.RLock()  # Reentrant lock for nested access
+        self._state_lock = threading.RLock()
         self._processing_cancelled = False
-        self._processing_complete = False
+        self._phase_1_complete = False
         
         self.current_phase = ""
         self.phase_progress = 0
-        self.total_phases = 5  # dependencies, extraction/loading, sharpness, selection, saving
-        self.last_error = None  # Store last error for analysis
+        self.total_phases = 2  # Phase 1: extraction/analysis, Phase 2: selection (interactive)
+        self.last_error = None
         
-        # Debug logging
-        logger.info(f"ProcessingScreen initialized with config: {config}")
+        logger.info(f"TwoPhaseProcessingScreen initialized with config: {config}")
     
     @property
     def processing_cancelled(self) -> bool:
@@ -59,52 +60,51 @@ class ProcessingScreen(Screen):
             self._processing_cancelled = value
     
     @property
-    def processing_complete(self) -> bool:
-        """Thread-safe getter for processing complete state."""
+    def phase_1_complete(self) -> bool:
+        """Thread-safe getter for phase 1 complete state."""
         with self._state_lock:
-            return self._processing_complete
+            return self._phase_1_complete
     
-    @processing_complete.setter
-    def processing_complete(self, value: bool) -> None:
-        """Thread-safe setter for processing complete state."""
+    @phase_1_complete.setter
+    def phase_1_complete(self, value: bool) -> None:
+        """Thread-safe setter for phase 1 complete state."""
         with self._state_lock:
-            self._processing_complete = value
-
+            self._phase_1_complete = value
+    
     def compose(self) -> ComposeResult:
         """Create the processing layout."""
-        logger.info("ProcessingScreen compose() called")
+        logger.info("TwoPhaseProcessingScreen compose() called")
         yield Header()
         
         with Container(id="processing-container"):
-            yield Static("Processing...", classes="title")
+            yield Static("Sharp Frames - Two Phase Processing", classes="title")
             yield Static("", id="status-text")
             yield Static("", id="phase-text")
             yield ProgressBar(id="progress-bar", show_eta=False)
+            yield Static("", id="detail-text", classes="detail")
             yield Button("Cancel", variant="default", id="cancel-processing")
         
         yield Footer()
     
     def on_mount(self) -> None:
-        """Start processing when mounted."""
-        logger.info("ProcessingScreen on_mount() called")
-        self.start_processing()
+        """Called when the screen is mounted."""
+        logger.info("TwoPhaseProcessingScreen mounted")
+        self.start_phase_1_processing()
     
-    def start_processing(self) -> None:
-        """Start the Sharp Frames processing asynchronously."""
-        logger.info("start_processing() called")
-        
+    def start_phase_1_processing(self) -> None:
+        """Start Phase 1: extraction and analysis processing."""
         try:
+            logger.info("Starting Phase 1 processing...")
+            
+            # Update UI elements  
             status_text = self.query_one("#status-text")
-            progress_bar = self.query_one("#progress-bar")
             phase_text = self.query_one("#phase-text")
+            progress_bar = self.query_one("#progress-bar")
+            detail_text = self.query_one("#detail-text")
             
             logger.info("UI elements found successfully")
             
             # Validate configuration
-            logger.info("Validating configuration...")
-            logger.info("_validate_config() called")
-            logger.info(f"Validating config: {self.config}")
-            
             if not self._validate_config(self.config):
                 logger.error("Configuration validation failed")
                 status_text.update("❌ Configuration validation failed")
@@ -114,27 +114,28 @@ class ProcessingScreen(Screen):
             
             logger.info("Configuration validation passed")
             
-            # Immediately show that processing has started
-            status_text.update("🔄 Initializing Sharp Frames processor...")
-            phase_text.update("Phase 1/5: Starting...")
-            progress_bar.update(progress=0)  # Start at 0%
+            # Show Phase 1 initialization
+            status_text.update("🔄 Phase 1: Initializing extraction and analysis...")
+            phase_text.update("Preparing to process frames...")
+            detail_text.update("This may take a few minutes depending on input size.")
+            progress_bar.update(progress=0)
             
-            logger.info("Starting worker thread...")
+            logger.info("Starting Phase 1 worker thread...")
             
-            # Start the processing in a background worker
-            self.run_worker(self._process_frames, exclusive=True, thread=True, name=WorkerNames.FRAME_PROCESSOR)
+            # Start Phase 1 processing in background worker
+            self.run_worker(self._process_phase_1, exclusive=True, thread=True, name=f"{WorkerNames.FRAME_PROCESSOR}_phase1")
             
-            logger.info("Worker thread started successfully")
+            logger.info("Phase 1 worker thread started successfully")
             
         except Exception as e:
-            logger.error(f"Error in start_processing(): {e}")
+            logger.error(f"Error in start_phase_1_processing(): {e}")
             logger.error(traceback.format_exc())
             self.query_one("#status-text").update(f"❌ Error starting processing: {str(e)}")
             self.query_one("#cancel-processing").label = "Close"
     
     def _validate_config(self, config: Dict[str, Any]) -> bool:
-        """Validate configuration and return True if valid, False if invalid."""
-        logger.info("_validate_config() called")
+        """Validate configuration for Phase 1 processing."""
+        logger.info("Validating config for Phase 1")
         
         # Check required fields
         if not config.get('input_path'):
@@ -144,8 +145,6 @@ class ProcessingScreen(Screen):
         if not config.get('output_dir'):
             logger.error("Missing output directory")
             return False
-        
-        logger.info("Basic config validation passed")
         
         # Use ErrorContext for comprehensive validation
         try:
@@ -165,58 +164,66 @@ class ProcessingScreen(Screen):
         except Exception as e:
             logger.error(f"System dependency check failed: {e}")
         
-        logger.info("All validation checks passed")
-        return True  # No issues found
+        logger.info("Phase 1 validation checks passed")
+        return True
     
-    def _progress_callback(self, phase: str, current: int, total: int, description: str = ""):
-        """Callback function to update progress from the processor.
+    def _process_phase_1(self) -> bool:
+        """Worker function for Phase 1: extraction and analysis."""
+        logger.info("Phase 1 worker started")
         
-        Args:
-            phase: Current processing phase (e.g., 'extraction', 'sharpness')
-            current: Current progress count within the phase
-            total: Total expected items for this phase (0 if unknown)
-            description: Human-readable description of current operation
-            
-        Note:
-            This method is thread-safe and can be called from worker threads.
-            Progress updates are scheduled on the main UI thread.
-        """
-        logger.debug(f"Progress callback: {phase} - {current}/{total} - {description}")
+        # Import TUIProcessor
+        from ...processing.tui_processor import TUIProcessor
         
-        # Thread-safe state check
-        with self._state_lock:
-            if self._processing_cancelled or self._processing_complete:
-                logger.debug("Progress callback ignored - processing cancelled or complete")
-                return
-        
-        self.current_phase = phase
-        
-        # Calculate overall progress across all phases
-        phase_mapping = {
-            ProcessingPhases.DEPENDENCIES: 0,
-            ProcessingPhases.EXTRACTION: 1, 
-            ProcessingPhases.LOADING: 1,  # Same as extraction phase
-            ProcessingPhases.SHARPNESS: 2,
-            ProcessingPhases.SELECTION: 3,
-            ProcessingPhases.SAVING: 4
-        }
-        
-        current_phase_num = phase_mapping.get(phase, 0)
-        
-        # Calculate progress within current phase (0-20% per phase)
-        phase_progress = 0
-        if total > 0:
-            phase_progress = (current / total) * 20  # Each phase is 20%
-        
-        # Calculate total progress (current phase * 20% + progress within phase)
-        total_progress = (current_phase_num * 20) + phase_progress
-        total_progress = min(100, max(0, total_progress))  # Clamp between 0-100
-        
-        # Schedule UI update on main thread with thread-safe state
         try:
-            self.app.call_from_thread(self._update_progress_ui, phase, current, total, total_progress, description)
+            logger.info("Creating TUIProcessor...")
+            self.processor = TUIProcessor()
+            
+            logger.info("Starting extraction and analysis...")
+            
+            # Create progress callback
+            def progress_callback(phase, current, total, description):
+                """Progress callback for TUIProcessor."""
+                # Calculate overall progress percentage
+                if total > 0:
+                    progress_pct = (current / total) * 100
+                else:
+                    progress_pct = 0
+                
+                # Update UI from thread
+                self.app.call_from_thread(
+                    self._update_progress_ui,
+                    phase, current, total, progress_pct, description
+                )
+            
+            # Run Phase 1: extract and analyze with progress callback
+            self.extraction_result = self.processor.extract_and_analyze(self.config, progress_callback)
+            
+            if not self.extraction_result or not self.extraction_result.frames:
+                logger.error("Phase 1 completed but no frames were extracted")
+                self.app.call_from_thread(
+                    self._update_progress_ui,
+                    "error", 0, 100, 0, "No frames were extracted"
+                )
+                return False
+            
+            logger.info(f"Phase 1 completed successfully - {len(self.extraction_result.frames)} frames processed")
+            
+            # Update progress to completion
+            self.app.call_from_thread(
+                self._update_progress_ui,
+                "complete", 100, 100, 100, f"Phase 1 complete - {len(self.extraction_result.frames)} frames ready"
+            )
+            
+            return True
+            
         except Exception as e:
-            logger.error(f"Failed to schedule UI update: {e}")
+            logger.error(f"Error in Phase 1 processing: {e}")
+            logger.error(traceback.format_exc())
+            self.app.call_from_thread(
+                self._update_progress_ui,
+                "error", 0, 100, 0, f"Error: {str(e)}"
+            )
+            return False
     
     def _update_progress_ui(self, phase: str, current: int, total: int, total_progress: float, description: str):
         """Update the UI with progress information."""
@@ -225,239 +232,187 @@ class ProcessingScreen(Screen):
         try:
             # Thread-safe state check
             with self._state_lock:
-                if self._processing_complete or self._processing_cancelled:
-                    logger.debug("UI update ignored - processing cancelled or complete")
+                if self._processing_cancelled:
+                    logger.debug("UI update ignored - processing cancelled")
                     return
                 
             status_text = self.query_one("#status-text")
             phase_text = self.query_one("#phase-text")
             progress_bar = self.query_one("#progress-bar")
+            detail_text = self.query_one("#detail-text")
             
-            # Update phase information
-            phase_names = {
-                ProcessingPhases.DEPENDENCIES: "Checking Dependencies",
-                ProcessingPhases.EXTRACTION: "Extracting Frames",
-                ProcessingPhases.LOADING: "Loading Images", 
-                ProcessingPhases.SHARPNESS: "Calculating Sharpness",
-                ProcessingPhases.SELECTION: "Selecting Frames",
-                ProcessingPhases.SAVING: "Saving Results"
-            }
-            
-            phase_name = phase_names.get(phase, phase.title())
-            phase_num = ["dependencies", "extraction", "loading", "sharpness", "selection", "saving"].index(phase) + 1
-            
-            if phase == "loading":
-                phase_num = 2  # Loading is phase 2, same as extraction conceptually
-            
-            status_text.update(f"🔄 {phase_name}...")
-            
-            if total > 0:
-                phase_text.update(f"Phase {phase_num}/5: {description} ({current}/{total})")
-            else:
-                phase_text.update(f"Phase {phase_num}/5: {description}")
-            
-            # Update progress bar
+            if phase == "extraction":
+                status_text.update("🔄 Phase 1: Extracting frames...")
+                phase_text.update(f"Progress: {current}/{total}" if total > 0 else "Extracting frames...")
+                
+            elif phase == "analysis" or "sharpness" in phase.lower():
+                status_text.update("🔍 Phase 1: Analyzing frame sharpness...")
+                phase_text.update(f"Analyzing: {current}/{total}" if total > 0 else "Calculating sharpness scores...")
+                
+            elif phase == "complete":
+                status_text.update("✅ Phase 1 Complete!")
+                phase_text.update("Ready for interactive selection")
+                
+            elif phase == "error":
+                status_text.update("❌ Phase 1 Failed")
+                phase_text.update("Processing error occurred")
+                
+            # Update progress bar and detail
             progress_bar.update(progress=total_progress)
-            
-            logger.debug("UI update completed successfully")
+            detail_text.update(description)
             
         except Exception as e:
-            # Fail silently if UI update fails to avoid breaking processing
-            logger.error(f"UI update failed: {e}")
-    
-    def _process_frames(self) -> bool:
-        """Worker function that runs the actual processing."""
-        logger.info("_process_frames() worker started")
-        
-        # Import here to avoid circular imports
-        from ...processing.minimal_progress import MinimalProgressSharpFrames
-        
-        try:
-            # Create a custom SharpFrames processor with progress callback
-            logger.info("Creating processor with config: %s", self.config)
-            logger.info("Debug info: Creating processor...")
-            
-            # Clean the config for processor (remove UI-specific keys)
-            clean_config = {k: v for k, v in self.config.items() if k != 'progress_callback'}
-            logger.info("Clean config for processor: %s", clean_config)
-            
-            # Clean the config for processor (remove UI-specific keys)
-            clean_config = {k: v for k, v in self.config.items() if k != 'progress_callback'}
-            logger.info("Clean config for processor: %s", clean_config)
-            
-            # Try to get app instance safely
-            try:
-                app_instance = self.app
-            except Exception:
-                app_instance = None
-                
-            processor = MinimalProgressSharpFrames(
-                progress_callback=self._progress_callback,
-                app_instance=app_instance,
-                **clean_config
-            )
-            
-            logger.info("MinimalProgressSharpFrames created successfully")
-            
-            # Run the processing
-            logger.info("Starting processor.run()...")
-            
-            try:
-                success = processor.run()
-                
-                logger.info(f"processor.run() completed with result: {success}")
-                
-                if not success:
-                    error_msg = ErrorContext.analyze_processing_failure(self.config)
-                    logger.error(f"Processing failed: {error_msg}")
-                else:
-                    logger.info("Processing completed successfully")
-                
-                return success
-                
-            except Exception as run_error:
-                logger.error(f"processor.run() failed with exception: {run_error}")
-                logger.error(traceback.format_exc())
-                self.last_error = run_error
-                error_msg = ErrorContext.analyze_processing_failure(self.config, run_error)
-                logger.error(f"Processing exception: {error_msg}")
-                raise run_error
-            
-        except KeyboardInterrupt:
-            logger.info("Processing cancelled by KeyboardInterrupt")
-            self.processing_cancelled = True
-            return False
-        except Exception as e:
-            logger.error(f"Unexpected error in _process_frames: {e}")
-            logger.error(traceback.format_exc())
-            self.last_error = e
-            # Analyze error and provide user-friendly message
-            error_msg = ErrorContext.analyze_processing_failure(self.config, e)
-            logger.error(f"Error analysis: {error_msg}")
-            # Re-raise the exception to be caught by worker error handler
-            raise e
-    
-    def _update_debug_info(self, message: str):
-        """Update UI with debug information."""
-        logger.info(f"Debug info: {message}")
-        try:
-            phase_text = self.query_one("#phase-text")
-            phase_text.update(f"Debug: {message}")
-        except Exception as e:
-            logger.error(f"Failed to update debug info: {e}")
+            logger.error(f"Error updating progress UI: {e}")
     
     def on_worker_state_changed(self, event) -> None:
         """Handle worker state changes."""
-        logger.info(f"Worker state changed: {event.worker.name} - {event.worker.state}")
-        
-        if event.worker.name == WorkerNames.FRAME_PROCESSOR:
-            status_text = self.query_one("#status-text")
-            progress_bar = self.query_one("#progress-bar")
-            phase_text = self.query_one("#phase-text")
+        if event.worker.name != f"{WorkerNames.FRAME_PROCESSOR}_phase1":
+            return
             
-            if event.worker.is_running:
-                logger.info("Worker is running")
-                # Keep current progress display while running
-                pass
-            elif event.worker.is_finished:
-                logger.info(f"Worker finished with result: {event.worker.result}")
-                # Thread-safe state update
-                self.processing_complete = True
+        logger.info(f"Phase 1 worker state changed: {event.worker.state}")
+        
+        status_text = self.query_one("#status-text")
+        phase_text = self.query_one("#phase-text")
+        progress_bar = self.query_one("#progress-bar")
+        
+        if event.worker.is_finished:
+            logger.info(f"Phase 1 worker finished with result: {event.worker.result}")
+            
+            if event.worker.result and self.extraction_result:
+                # Phase 1 completed successfully
+                self.phase_1_complete = True
+                logger.info("Phase 1 completed successfully, transitioning to selection screen")
                 
-                if event.worker.result:
-                    logger.info("Processing completed successfully")
-                    status_text.update("✅ Processing completed successfully!")
-                    phase_text.update("All phases complete!")
-                    progress_bar.display = False  # Hide the progress bar when complete
+                status_text.update("✅ Phase 1 Complete - Transitioning to selection...")
+                phase_text.update("Opening interactive selection screen...")
+                progress_bar.update(progress=100)
+                
+                # Transition to selection screen
+                self._transition_to_selection_screen()
+                
+            else:
+                # Phase 1 failed
+                logger.error("Phase 1 failed")
+                if self.processing_cancelled:
+                    status_text.update("⚠️ Phase 1 cancelled by user.")
+                    phase_text.update("Processing was cancelled.")
                 else:
-                    logger.warning("Worker finished but returned False")
-                    # Thread-safe state check
-                    if self.processing_cancelled:
-                        logger.info("Processing was cancelled by user")
-                        status_text.update("⚠️ Processing cancelled by user.")
-                        phase_text.update("Processing was cancelled.")
-                    else:
-                        logger.error("Processing failed - worker returned False")
-                        # Worker finished but returned False - provide detailed error analysis
-                        status_text.update("❌ Processing failed")
-                        
-                        # Use ErrorContext to provide better error messages
-                        if self.last_error:
-                            error_msg = ErrorContext.analyze_processing_failure(self.config, self.last_error)
-                            logger.error(f"Error analysis with exception: {error_msg}")
-                        else:
-                            error_msg = ErrorContext.analyze_processing_failure(self.config)
-                            logger.error(f"Error analysis without exception: {error_msg}")
-                        
-                        phase_text.update(error_msg)
-                        
-                    progress_bar.update(progress=0)  # Show failed state without animation
+                    status_text.update("❌ Phase 1 failed.")
+                    phase_text.update("Frame extraction or analysis failed.")
                 
-                # Change button to close
+                progress_bar.update(progress=0)
                 self.query_one("#cancel-processing").label = "Close"
-            elif event.worker.is_cancelled:
-                logger.info("Worker was cancelled")
-                # Thread-safe state update
-                self.processing_complete = True
-                status_text.update("⚠️ Processing cancelled.")
-                phase_text.update("Processing was cancelled.")
-                progress_bar.update(progress=0)  # Show cancelled state without animation
-                self.query_one("#cancel-processing").label = "Close"
+                
+        elif event.worker.is_cancelled:
+            logger.info("Phase 1 worker was cancelled")
+            self.phase_1_complete = True
+            status_text.update("⚠️ Phase 1 cancelled.")
+            phase_text.update("Processing was cancelled.")
+            progress_bar.update(progress=0)
+            self.query_one("#cancel-processing").label = "Close"
     
     def on_worker_state_error(self, event) -> None:
         """Handle worker errors."""
-        logger.error(f"Worker error: {event.worker.name} - {event.error}")
+        if event.worker.name != f"{WorkerNames.FRAME_PROCESSOR}_phase1":
+            return
+            
+        logger.error(f"Phase 1 worker error: {event.error}")
         
-        if event.worker.name == WorkerNames.FRAME_PROCESSOR:
-            # Thread-safe state update
-            self.processing_complete = True
+        self.phase_1_complete = True
+        self.last_error = event.error
+        
+        # Analyze error and provide user-friendly message
+        error_msg = "Unknown error occurred"
+        if event.error:
+            error_msg = ErrorContext.analyze_processing_failure(self.config, event.error)
             
-            # Analyze error and provide user-friendly message
-            error_msg = "Unknown error occurred"
-            if event.error:
-                logger.error(f"Worker error details: {event.error}")
-                logger.error(traceback.format_exc())
-                self.last_error = event.error
-                error_msg = ErrorContext.analyze_processing_failure(self.config, event.error)
-                
-                # Log detailed error for debugging
-                if hasattr(event.error, '__traceback__'):
-                    import traceback
-                    error_details = ''.join(traceback.format_exception(type(event.error), event.error, event.error.__traceback__))
-                    logger.error(f"Detailed error traceback:\n{error_details}")
+            # Log detailed error
+            if hasattr(event.error, '__traceback__'):
+                error_details = ''.join(traceback.format_exception(
+                    type(event.error), event.error, event.error.__traceback__
+                ))
+                logger.error(f"Detailed error traceback:\n{error_details}")
+        
+        # Update UI
+        status_text = self.query_one("#status-text")
+        phase_text = self.query_one("#phase-text")
+        progress_bar = self.query_one("#progress-bar")
+        
+        status_text.update(f"❌ Phase 1 Error")
+        phase_text.update(error_msg)
+        progress_bar.update(progress=0)
+        self.query_one("#cancel-processing").label = "Close"
+    
+    def _transition_to_selection_screen(self) -> None:
+        """Transition to the interactive selection screen."""
+        try:
+            logger.info("Transitioning to SelectionScreen")
             
-            self.query_one("#status-text").update("❌ Processing Error")
-            self.query_one("#phase-text").update(error_msg)
-            self.query_one("#progress-bar").update(progress=0)  # Show error state without animation
+            # Create and push the selection screen
+            selection_screen = SelectionScreen(
+                processor=self.processor,
+                extraction_result=self.extraction_result,
+                config=self.config
+            )
+            
+            # Push the new screen (this will handle the transition)
+            self.app.push_screen(selection_screen)
+            
+        except Exception as e:
+            logger.error(f"Error transitioning to selection screen: {e}")
+            logger.error(traceback.format_exc())
+            
+            # Fallback error display
+            status_text = self.query_one("#status-text")
+            status_text.update(f"❌ Error opening selection screen: {str(e)}")
             self.query_one("#cancel-processing").label = "Close"
     
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses."""
-        logger.info(f"Button pressed: {event.button.id} - {event.button.label}")
-        
         if event.button.id == "cancel-processing":
-            if event.button.label == "Cancel":
-                self.action_cancel()
+            if self.phase_1_complete:
+                # Processing is complete, this is now a "Close" button
+                self.app.pop_screen()
             else:
-                # Close button
-                self.app.exit(result="completed")
+                # Cancel processing
+                self.action_cancel()
     
     def action_cancel(self) -> None:
-        """Cancel processing."""
-        logger.info("action_cancel() called")
+        """Cancel the current processing."""
+        logger.info("Cancelling Phase 1 processing")
         
-        # Thread-safe state update
+        # Set cancellation flag
         self.processing_cancelled = True
         
-        # Cancel the worker if it's running
-        workers = self.workers
-        for worker in workers:
-            if worker.name == WorkerNames.FRAME_PROCESSOR and not worker.is_finished:
-                logger.info(f"Cancelling worker: {worker.name}")
-                worker.cancel()
-                break
+        # Cancel any running workers
+        try:
+            for worker in self.workers:
+                if not worker.is_finished:
+                    worker.cancel()
+        except Exception as e:
+            logger.error(f"Error cancelling workers: {e}")
         
-        # If no worker was cancelled, just exit
-        if not any(w.name == WorkerNames.FRAME_PROCESSOR for w in workers):
-            logger.info("No active worker found, exiting directly")
-            self.app.exit(result="cancelled") 
+        # Update UI
+        try:
+            status_text = self.query_one("#status-text")
+            phase_text = self.query_one("#phase-text")
+            progress_bar = self.query_one("#progress-bar")
+            
+            status_text.update("⚠️ Cancelling...")
+            phase_text.update("Please wait while processing stops...")
+            progress_bar.update(progress=0)
+            
+        except Exception as e:
+            logger.error(f"Error updating UI during cancellation: {e}")
+    
+    def on_unmount(self) -> None:
+        """Clean up when screen is unmounted."""
+        logger.info("TwoPhaseProcessingScreen unmounting")
+        
+        # Clean up processor if needed
+        if self.processor:
+            try:
+                self.processor.cleanup_temp_directory()
+            except Exception as e:
+                logger.warning(f"Error cleaning up processor: {e}")
+        

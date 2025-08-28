@@ -223,7 +223,7 @@ class FrameExtractor:
         """Create frame data with video attribution for video directory processing."""
         # Extract video number from source_video (e.g., "video_001" -> "01")
         video_num = source_video.split('_')[1]  # "001"
-        output_name = f"video{video_num}_{index + 1:05d}"
+        output_name = f"video{video_num}_{source_index + 1:05d}"
         
         return FrameData(
             path=path,
