@@ -5,6 +5,31 @@ All notable changes to the Sharp Frames project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2025-01-28
+
+### Added
+- **Two-phase processing architecture**: Separate extraction/analysis from selection phase
+- **Interactive selection screen**: Visual preview of frame selection with real-time feedback
+- **Sharpness visualization**: Bar chart showing frame quality distribution (first 100 frames)
+- **Live selection preview**: See frame count before applying selection
+- **Parameter adjustment**: Fine-tune selection parameters with instant visual feedback
+
+### Changed
+- **TUI workflow**: Now operates in distinct extraction and selection phases
+- **Selection process**: Interactive with visual feedback instead of batch processing
+- **Resource efficiency**: Analyze frames once, try multiple selection methods without reprocessing
+
+### Fixed
+- **Windows compatibility**: FFmpeg process hanging on Windows with large videos
+- **Process termination**: Proper subprocess cleanup with timeout handling
+- **Thread safety**: Enhanced concurrent processing stability on Windows
+
+### Technical
+- **Two-phase TUIProcessor**: New orchestrator for separated extraction and selection phases
+- **Selection preview API**: Added preview_selection methods to processor and selector
+- **SharpnessChart widget**: Custom Textual widget for frame quality visualization
+- **Windows FFmpeg fix**: Proactive termination on frame count completion with stall detection
+
 ## [0.2.4] - 2025-01-21
 
 ### Added
