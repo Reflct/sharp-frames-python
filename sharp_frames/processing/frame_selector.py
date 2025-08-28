@@ -28,6 +28,21 @@ class FrameSelector:
         # Constants for outlier removal
         self.OUTLIER_MIN_NEIGHBORS = 3
         self.OUTLIER_THRESHOLD_DIVISOR = 4
+        
+        # Constants for outlier removal preview calculation
+        # Maps sensitivity ranges to estimated removal rates
+        self.OUTLIER_REMOVAL_RATES = {
+            90: 0.40,  # Very aggressive removal
+            80: 0.30,  # Aggressive removal
+            70: 0.25,  # High removal
+            60: 0.20,  # Moderate-high removal
+            50: 0.15,  # Moderate removal
+            40: 0.10,  # Low-moderate removal
+            30: 0.07,  # Low removal
+            20: 0.05,  # Very low removal
+            10: 0.03,  # Minimal removal
+            0:  0.01   # Barely any removal
+        }
     
     def _get_progress_bar(self, total: int, desc: str):
         """Get a progress bar or null context based on show_progress setting."""
@@ -227,32 +242,21 @@ class FrameSelector:
         if not frames:
             return 0
         
-        # Use more granular heuristic for responsive preview
-        # Estimate based on sensitivity: higher sensitivity = more aggressive removal
-        # Linear interpolation for smoother changes
-        if outlier_sensitivity >= 90:
-            removal_rate = 0.40  # Remove ~40% of frames
-        elif outlier_sensitivity >= 80:
-            removal_rate = 0.30  # Remove ~30% of frames
-        elif outlier_sensitivity >= 70:
-            removal_rate = 0.25  # Remove ~25% of frames
-        elif outlier_sensitivity >= 60:
-            removal_rate = 0.20  # Remove ~20% of frames
-        elif outlier_sensitivity >= 50:
-            removal_rate = 0.15  # Remove ~15% of frames
-        elif outlier_sensitivity >= 40:
-            removal_rate = 0.10  # Remove ~10% of frames
-        elif outlier_sensitivity >= 30:
-            removal_rate = 0.07  # Remove ~7% of frames
-        elif outlier_sensitivity >= 20:
-            removal_rate = 0.05  # Remove ~5% of frames
-        elif outlier_sensitivity >= 10:
-            removal_rate = 0.03  # Remove ~3% of frames
-        else:
-            removal_rate = 0.01  # Remove ~1% of frames
+        # Find the appropriate removal rate based on sensitivity
+        removal_rate = self._get_removal_rate_for_sensitivity(outlier_sensitivity)
         
         estimated_selected = int(len(frames) * (1.0 - removal_rate))
         return max(1, estimated_selected)  # Always select at least 1 frame
+    
+    def _get_removal_rate_for_sensitivity(self, sensitivity: int) -> float:
+        """Get removal rate for a given sensitivity value using constant lookup."""
+        # Find the appropriate threshold
+        for threshold in sorted(self.OUTLIER_REMOVAL_RATES.keys(), reverse=True):
+            if sensitivity >= threshold:
+                return self.OUTLIER_REMOVAL_RATES[threshold]
+        
+        # Fallback to minimal removal
+        return self.OUTLIER_REMOVAL_RATES[0]
     
     def _calculate_weighted_scores(self, frames_dict: List[Dict[str, Any]]) -> List[float]:
         """Calculate weighted scores combining sharpness and distribution."""

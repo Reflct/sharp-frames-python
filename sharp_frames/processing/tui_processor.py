@@ -111,36 +111,16 @@ class TUIProcessor:
         Raises:
             RuntimeError: If no extraction result is available
         """
-        with open("debug_save.log", "a") as f:
-            f.write(f"TUIProcessor.complete_selection called\n")
-            f.write(f"  method: {method}\n")
-            f.write(f"  config: {config}\n")
-            f.write(f"  params: {params}\n")
-            f.write(f"  has current_result: {self.current_result is not None}\n")
-            if self.current_result:
-                f.write(f"  current_result.frames count: {len(self.current_result.frames)}\n")
-        
         if not self.current_result:
-            with open("debug_save.log", "a") as f:
-                f.write("ERROR: No extraction result available\n")
             raise RuntimeError("No extraction result available. Run extract_and_analyze() first.")
         
         try:
-            with open("debug_save.log", "a") as f:
-                f.write(f"Phase 2: Selecting and saving frames using {method} method...\n")
             print(f"Phase 2: Selecting and saving frames using {method} method...")
             
             # Select frames
-            with open("debug_save.log", "a") as f:
-                f.write("Calling FrameSelector.select_frames...\n")
             selected_frames = self.selector.select_frames(self.current_result.frames, method, **params)
             
-            with open("debug_save.log", "a") as f:
-                f.write(f"FrameSelector returned {len(selected_frames) if selected_frames else 0} frames\n")
-            
             if not selected_frames:
-                with open("debug_save.log", "a") as f:
-                    f.write("ERROR: No frames were selected based on the criteria\n")
                 print("No frames were selected based on the criteria.")
                 return False
             
@@ -151,15 +131,8 @@ class TUIProcessor:
             selection_config['selection_method'] = method
             selection_config.update(params)
             
-            with open("debug_save.log", "a") as f:
-                f.write(f"Final selection_config: {selection_config}\n")
-                f.write("Calling FrameSaver.save_frames...\n")
-            
             # Save frames
             success = self.saver.save_frames(selected_frames, selection_config)
-            
-            with open("debug_save.log", "a") as f:
-                f.write(f"FrameSaver.save_frames returned: {success}\n")
             
             if success:
                 print("Selection and saving completed successfully.")
@@ -171,11 +144,6 @@ class TUIProcessor:
             return success
             
         except Exception as e:
-            with open("debug_save.log", "a") as f:
-                f.write(f"EXCEPTION in TUIProcessor.complete_selection: {e}\n")
-                f.write(f"Exception type: {type(e).__name__}\n")
-                import traceback
-                f.write(f"Traceback:\n{traceback.format_exc()}\n")
             print(f"Error during selection and saving: {e}")
             return False
     

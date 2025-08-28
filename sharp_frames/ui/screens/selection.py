@@ -4,22 +4,24 @@ Interactive selection screen for Sharp Frames TUI.
 
 import asyncio
 from typing import Dict, Any, Optional, List
+
 from textual.app import ComposeResult
-from textual.containers import Container, Horizontal
-from textual.widgets import (
-    Header, Footer, Button, Static, Label, Select, Input
-)
-from textual.screen import Screen
 from textual.binding import Binding
+from textual.containers import Container, Horizontal
 from textual.message import Message
 from textual.reactive import reactive
-from textual.widget import Widget
+from textual.screen import Screen
 from textual.strip import Strip
+from textual.widget import Widget
+from textual.widgets import (
+    Button, Footer, Header, Input, Label, Select, Static
+)
+
 from rich.segment import Segment
 from rich.style import Style
 
-from ...processing.tui_processor import TUIProcessor
 from ...models.frame_data import ExtractionResult, FrameData
+from ...processing.tui_processor import TUIProcessor
 
 
 class SharpnessChart(Widget):
@@ -437,17 +439,30 @@ class SelectionScreen(Screen):
                 self.current_parameters[param_name] = value
                 self._update_preview_async()
                 
-        except (ValueError, KeyError) as e:
-            # Invalid input - revert to current value
-            self.app.log.warning(f"Invalid input for {param_name}: '{value_str}'")
-            try:
-                current_value = self.current_parameters.get(param_name, 
-                    self.method_definitions[self.current_method]["parameters"][param_name]["default"])
-                # Find the input widget and reset its value
-                input_widget = self.query_one(f"#param_{self.current_method}_{param_name}", Input)
-                input_widget.value = str(current_value)
-            except:
-                pass
+        except ValueError:
+            # Invalid numeric input - revert to current value
+            self.app.log.warning(f"Invalid numeric input for {param_name}: '{value_str}'")
+            self._revert_parameter_input(param_name)
+        except KeyError:
+            # Parameter not found in method definition - this shouldn't happen
+            self.app.log.error(f"Parameter '{param_name}' not found for method '{self.current_method}'")
+            self._revert_parameter_input(param_name)
+        except Exception as e:
+            # Unexpected error - log and revert
+            self.app.log.error(f"Unexpected error handling parameter change for {param_name}: {e}")
+            self._revert_parameter_input(param_name)
+    
+    def _revert_parameter_input(self, param_name: str) -> None:
+        """Revert a parameter input to its current valid value."""
+        try:
+            current_value = self.current_parameters.get(param_name, 
+                self.method_definitions[self.current_method]["parameters"][param_name]["default"])
+            # Find the input widget and reset its value
+            input_widget = self.query_one(f"#param_{self.current_method}_{param_name}", Input)
+            input_widget.value = str(current_value)
+        except Exception as e:
+            self.app.log.error(f"Failed to revert parameter input for {param_name}: {e}")
+            # Last resort - don't crash the UI
     
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses."""
@@ -670,66 +685,97 @@ The preview count updates instantly as you make changes, so you can experiment f
     
     async def _process_final_selection(self, final_config: Dict[str, Any]) -> None:
         """Process the final selection and saving."""
+        selected_count = self.selected_count
+        processing_label = None
+        
         try:
-            
-            # Store the selected count for use in success message
-            selected_count = self.selected_count
-            
             # Show processing indicator
-            processing_label = Label("🔄 Processing selection...", classes="processing_indicator")
-            self.query_one("#main_content").mount(processing_label)
+            processing_label = await self._show_processing_indicator()
             
-            # Run the final selection (this is CPU intensive, so we run it in a thread)
-            # Note: run_in_executor doesn't support keyword arguments, so we use a lambda
-            success = await asyncio.get_event_loop().run_in_executor(
-                None, 
-                lambda: self.processor.complete_selection(
-                    self.current_method,
-                    final_config,
-                    **self.current_parameters
-                )
-            )
+            # Run the final selection in background thread
+            success = await self._execute_selection_in_background(final_config)
             
             if success:
-                # Show success message
-                processing_label.update("✅ Selection completed successfully!")
-                await asyncio.sleep(1)
-                
-                # Remove processing label and show success UI
-                await processing_label.remove()
-                
-                # Show success message with Start Over button in horizontal layout
-                success_container = Horizontal(
-                    Container(
-                        Static("✅ Images saved successfully!", classes="success_message"),
-                        Static(f"Saved {selected_count} frames to {final_config['output_dir']}", classes="success_details"),
-                        classes="success_text_container"
-                    ),
-                    Button("Start Over", id="start_over_button", variant="primary"),
-                    id="success_container",
-                    classes="success_container"
-                )
-                await self.query_one("#main_content").mount(success_container)
-                
-                # Focus the start over button
-                self.query_one("#start_over_button", Button).focus()
+                await self._handle_selection_success(processing_label, selected_count, final_config)
             else:
-                # Show error and re-enable UI
-                processing_label.update("❌ Selection failed. Please try again.")
-                await asyncio.sleep(3)
-                processing_label.remove()
-                self.query_one("#confirm_button", Button).disabled = False
-                self.query_one("#method_select", Select).disabled = False
+                await self._handle_selection_failure(processing_label)
                 
         except Exception as e:
-            
             self.app.log.error(f"Error during final processing: {e}")
-            # Re-enable UI on error
+            await self._handle_selection_error(processing_label, str(e))
+    
+    async def _show_processing_indicator(self) -> Label:
+        """Show the processing indicator and return the label widget."""
+        processing_label = Label("🔄 Processing selection...", classes="processing_indicator")
+        await self.query_one("#main_content").mount(processing_label)
+        return processing_label
+    
+    async def _execute_selection_in_background(self, final_config: Dict[str, Any]) -> bool:
+        """Execute the selection process in a background thread."""
+        # Run the final selection (this is CPU intensive, so we run it in a thread)
+        # Note: run_in_executor doesn't support keyword arguments, so we use a lambda
+        return await asyncio.get_event_loop().run_in_executor(
+            None, 
+            lambda: self.processor.complete_selection(
+                self.current_method,
+                final_config,
+                **self.current_parameters
+            )
+        )
+    
+    async def _handle_selection_success(self, processing_label: Label, selected_count: int, final_config: Dict[str, Any]) -> None:
+        """Handle successful selection completion."""
+        # Show success message
+        processing_label.update("✅ Selection completed successfully!")
+        await asyncio.sleep(1)
+        
+        # Remove processing label and show success UI
+        await processing_label.remove()
+        
+        # Create and mount success container
+        success_container = self._create_success_container(selected_count, final_config)
+        await self.query_one("#main_content").mount(success_container)
+        
+        # Focus the start over button
+        self.query_one("#start_over_button", Button).focus()
+    
+    async def _handle_selection_failure(self, processing_label: Label) -> None:
+        """Handle selection failure."""
+        processing_label.update("❌ Selection failed. Please try again.")
+        await asyncio.sleep(3)
+        await processing_label.remove()
+        self._re_enable_ui()
+    
+    async def _handle_selection_error(self, processing_label: Optional[Label], error_message: str) -> None:
+        """Handle unexpected errors during selection."""
+        if processing_label:
             try:
-                processing_label.update(f"❌ Error: {str(e)}")
+                processing_label.update(f"❌ Error: {error_message}")
                 await asyncio.sleep(3)
-                processing_label.remove()
-            except:
+                await processing_label.remove()
+            except Exception:
+                # Ignore errors when trying to update/remove the label
                 pass
+        self._re_enable_ui()
+    
+    def _create_success_container(self, selected_count: int, final_config: Dict[str, Any]) -> Horizontal:
+        """Create the success message container."""
+        return Horizontal(
+            Container(
+                Static("✅ Images saved successfully!", classes="success_message"),
+                Static(f"Saved {selected_count} frames to {final_config['output_dir']}", classes="success_details"),
+                classes="success_text_container"
+            ),
+            Button("Start Over", id="start_over_button", variant="primary"),
+            id="success_container",
+            classes="success_container"
+        )
+    
+    def _re_enable_ui(self) -> None:
+        """Re-enable UI controls after processing."""
+        try:
             self.query_one("#confirm_button", Button).disabled = False
             self.query_one("#method_select", Select).disabled = False
+        except Exception:
+            # Ignore errors if widgets don't exist
+            pass

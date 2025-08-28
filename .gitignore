@@ -43,3 +43,4 @@ htmlcov/
 *.log
 
 claude.md
+.claude/
