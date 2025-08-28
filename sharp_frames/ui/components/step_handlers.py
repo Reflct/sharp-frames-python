@@ -18,7 +18,7 @@ from .validators import (
 )
 
 
-class TwoPhaseStepHandler:
+class StepHandler:
     """Base class for two-phase configuration step handlers."""
     
     def __init__(self):
@@ -53,7 +53,7 @@ class TwoPhaseStepHandler:
         return ""
 
 
-class InputTypeStepHandler(TwoPhaseStepHandler):
+class InputTypeStepHandler(StepHandler):
     """Handler for input type selection step."""
     
     def get_title(self) -> str:
@@ -115,7 +115,7 @@ class InputTypeStepHandler(TwoPhaseStepHandler):
             screen.app.log.error(f"Error setting input type data: {e}")
 
 
-class InputPathStepHandler(TwoPhaseStepHandler):
+class InputPathStepHandler(StepHandler):
     """Handler for input path selection step."""
     
     def get_title(self) -> str:
@@ -195,7 +195,7 @@ class InputPathStepHandler(TwoPhaseStepHandler):
             pass
 
 
-class OutputDirStepHandler(TwoPhaseStepHandler):
+class OutputDirStepHandler(StepHandler):
     """Handler for output directory selection step."""
     
     def get_title(self) -> str:
@@ -259,7 +259,7 @@ class OutputDirStepHandler(TwoPhaseStepHandler):
             pass
 
 
-class FpsStepHandler(TwoPhaseStepHandler):
+class FpsStepHandler(StepHandler):
     """Handler for FPS selection step."""
     
     def get_title(self) -> str:
@@ -326,7 +326,7 @@ class FpsStepHandler(TwoPhaseStepHandler):
             pass
 
 
-class OutputFormatStepHandler(TwoPhaseStepHandler):
+class OutputFormatStepHandler(StepHandler):
     """Handler for output format selection step."""
     
     def get_title(self) -> str:
@@ -376,7 +376,7 @@ class OutputFormatStepHandler(TwoPhaseStepHandler):
             pass
 
 
-class WidthStepHandler(TwoPhaseStepHandler):
+class WidthStepHandler(StepHandler):
     """Handler for width/resize selection step."""
     
     def get_title(self) -> str:
@@ -443,7 +443,7 @@ class WidthStepHandler(TwoPhaseStepHandler):
             pass
 
 
-class ForceOverwriteStepHandler(TwoPhaseStepHandler):
+class ForceOverwriteStepHandler(StepHandler):
     """Handler for force overwrite option step."""
     
     def get_title(self) -> str:
@@ -488,7 +488,7 @@ class ForceOverwriteStepHandler(TwoPhaseStepHandler):
             pass
 
 
-class ConfirmStepHandler(TwoPhaseStepHandler):
+class ConfirmStepHandler(StepHandler):
     """Handler for configuration confirmation step."""
     
     def get_title(self) -> str:

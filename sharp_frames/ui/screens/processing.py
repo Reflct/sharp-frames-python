@@ -22,7 +22,7 @@ from .selection import SelectionScreen
 logger = logging.getLogger(__name__)
 
 
-class TwoPhaseProcessingScreen(Screen):
+class ProcessingScreen(Screen):
     """Screen for two-phase processing (extraction/analysis → interactive selection)."""
     
     BINDINGS = [

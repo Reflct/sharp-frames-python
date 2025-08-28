@@ -224,4 +224,3 @@ class SharpFramesApp(App):
 
 
 # Create alias for compatibility
-SharpFramesAppV2 = TwoPhaseSharpFramesApp

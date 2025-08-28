@@ -92,7 +92,6 @@ class ConfigurationForm(Screen):
 [#2575E6]╚══════╝╚═╝[/#2575E6]  [#2575E6]╚═╝╚═╝[/#2575E6]  [#2575E6]╚═╝╚═╝[/#2575E6]  [#2575E6]╚═╝╚═╝[/#2575E6]         [#2575E6]╚═╝[/#2575E6]     [#2575E6]╚═╝[/#2575E6]  [#2575E6]╚═╝╚═╝[/#2575E6]  [#2575E6]╚═╝╚═╝[/#2575E6]     [#2575E6]╚═╝╚══════╝╚══════╝[/#2575E6]
         """
         yield Static(ascii_title, classes="title")
-        yield Static("Interactive Frame Selection", classes="subtitle")
         yield Static("", id="step-info", classes="step-info")
         yield Static("", id="step-description", classes="step-description")
         

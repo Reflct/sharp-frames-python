@@ -13,13 +13,11 @@ from .validators import (
 )
 
 from .step_handlers import (
-    BaseStepHandler,
+    StepHandler,
     InputTypeStepHandler,
     InputPathStepHandler,
     OutputDirStepHandler,
     FpsStepHandler,
-    SelectionMethodStepHandler,
-    MethodParamsStepHandler,
     OutputFormatStepHandler,
     WidthStepHandler,
     ForceOverwriteStepHandler,
@@ -37,13 +35,11 @@ __all__ = [
     'ValidationHelpers',
     
     # Step Handlers
-    'BaseStepHandler',
+    'StepHandler',
     'InputTypeStepHandler',
     'InputPathStepHandler',
     'OutputDirStepHandler',
     'FpsStepHandler',
-    'SelectionMethodStepHandler',
-    'MethodParamsStepHandler',
     'OutputFormatStepHandler',
     'WidthStepHandler',
     'ForceOverwriteStepHandler',
