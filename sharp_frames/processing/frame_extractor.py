@@ -363,32 +363,81 @@ class FrameExtractor:
             # Monitor progress by counting extracted files
             last_file_count = 0
             start_time = time.time()
+            last_progress_time = start_time  # Track when we last saw progress
+            stall_timeout = 10.0  # Consider stalled if no progress for 10 seconds
             
             while process.poll() is None:
+                current_time = time.time()
+                elapsed = current_time - start_time
+                
                 # Check for timeout
-                if time.time() - start_time > timeout:
+                if elapsed > timeout:
                     process.kill()
                     raise subprocess.TimeoutExpired(cmd, timeout)
                 
                 # Count extracted files
                 if os.path.exists(output_dir):
-                    file_count = len([f for f in os.listdir(output_dir) if f.startswith('frame_')])
-                    
-                    if file_count > last_file_count and self.progress_callback:
-                        if estimated_total:
-                            self.progress_callback("extraction", file_count, estimated_total, 
-                                                f"Extracted {file_count}/{estimated_total} frames")
-                        else:
-                            self.progress_callback("extraction", file_count, 0, f"Extracted {file_count} frames")
-                        last_file_count = file_count
+                    try:
+                        file_count = len([f for f in os.listdir(output_dir) if f.startswith('frame_')])
+                        
+                        if file_count > last_file_count:
+                            # We have new frames, update progress time
+                            last_progress_time = current_time
+                            
+                            if self.progress_callback:
+                                if estimated_total:
+                                    self.progress_callback("extraction", file_count, estimated_total, 
+                                                        f"Extracted {file_count}/{estimated_total} frames")
+                                else:
+                                    self.progress_callback("extraction", file_count, 0, f"Extracted {file_count} frames")
+                            last_file_count = file_count
+                            
+                            # Check if we've reached the expected total
+                            if estimated_total > 0 and file_count >= estimated_total:
+                                process.terminate()
+                                break
+                        
+                        # Check for stalled extraction (prevents hanging on Windows)
+                        if current_time - last_progress_time > stall_timeout:
+                            process.terminate()
+                            break
+                    except Exception:
+                        pass  # Continue if file counting fails
                 
                 time.sleep(0.1)  # Small delay to avoid excessive polling
             
-            # Get final results
-            stdout, stderr = process.communicate()
+            # Ensure process is terminated and wait for it to finish
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    # Wait up to 5 seconds for graceful termination
+                    stdout, stderr = process.communicate(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    stdout, stderr = process.communicate()
+            else:
+                # Process already finished, get results
+                stdout, stderr = process.communicate()
             
-            if process.returncode != 0:
-                print(f"FFmpeg error: {stderr}")
+            # Check if extraction was successful based on frame count
+            # Don't rely on return code since we may have terminated the process
+            if os.path.exists(output_dir):
+                actual_frame_count = len([f for f in os.listdir(output_dir) if f.startswith('frame_')])
+                
+                # Consider successful if we have frames and either:
+                # 1. We reached the expected count, or
+                # 2. We have a reasonable number of frames (at least 10)
+                success = actual_frame_count > 0 and (
+                    (estimated_total > 0 and actual_frame_count >= estimated_total * 0.95) or  # Allow 5% tolerance
+                    actual_frame_count >= 10
+                )
+                
+                if not success:
+                    print(f"FFmpeg extraction incomplete: {actual_frame_count} frames")
+                    if stderr:
+                        print(f"FFmpeg stderr: {stderr}")
+                    return False
+            else:
                 return False
             
             # Final progress update
@@ -397,14 +446,17 @@ class FrameExtractor:
                 if self.progress_callback:
                     self.progress_callback("extraction", final_frame_count, final_frame_count, 
                                         f"Extraction complete: {final_frame_count} frames")
-                
+            
             return True
             
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired as e:
             print(f"FFmpeg extraction timeout for {video_path}")
             return False
-        except FileNotFoundError:
+        except FileNotFoundError as e:
             print("FFmpeg not found. Please install FFmpeg.")
+            return False
+        except Exception as e:
+            print(f"Unexpected error during frame extraction: {e}")
             return False
     
     def _get_extracted_frame_files(self, temp_dir: str) -> List[str]:

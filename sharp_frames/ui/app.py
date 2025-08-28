@@ -75,7 +75,27 @@ class SharpFramesApp(App):
                 self.log.warning(f"Could not restore handler for signal {sig}: {e}")
     
     def on_key(self, event: Key) -> None:
-        """Handle escape sequence detection and prevention."""
+        """Handle key events including cancellation keys for Windows compatibility."""
+        # Handle Ctrl+C and Ctrl+Q for cancellation (Windows-friendly)
+        if event.key == "ctrl+c" or event.key == "ctrl+q":
+            self.log.info(f"Received {event.key} - attempting to cancel current operation")
+            # Try to cancel current screen's operations
+            try:
+                current_screen = self.screen_stack[-1] if self.screen_stack else None
+                if current_screen and hasattr(current_screen, 'action_cancel'):
+                    current_screen.action_cancel()
+                    return  # Handled
+                elif current_screen and hasattr(current_screen, 'processor'):
+                    # Try to cancel processor directly
+                    if hasattr(current_screen.processor, 'cancel_processing'):
+                        current_screen.processor.cancel_processing()
+                        self.log.info("Cancelled processor operations")
+            except Exception as e:
+                self.log.error(f"Error during cancellation: {e}")
+            
+            # Fall back to standard handling
+            return
+        
         # Track escape key patterns to identify spurious sequences
         if event.key == "escape":
             current_time = time.time()

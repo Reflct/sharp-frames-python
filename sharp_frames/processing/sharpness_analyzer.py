@@ -4,6 +4,10 @@ Sharpness analysis component for Sharp Frames.
 
 import cv2
 import concurrent.futures
+import os
+import sys
+import time
+import threading
 from multiprocessing import cpu_count
 from typing import List, Callable, Optional
 from tqdm import tqdm
@@ -27,6 +31,20 @@ class SharpnessAnalyzer:
             max_workers: Maximum number of worker threads. If None, uses cpu_count().
         """
         self.max_workers = max_workers or cpu_count()
+        self._is_windows = os.name == 'nt' or sys.platform.startswith('win')
+        self._cancellation_event = threading.Event()
+        
+        # Windows-specific settings
+        if self._is_windows:
+            # Reduce thread count on Windows to avoid thread pool issues
+            self.max_workers = min(self.max_workers, 4)
+            # Add timeouts for Windows operations
+            self._operation_timeout = 300  # 5 minutes
+            self._progress_timeout = 30    # 30 seconds
+    
+    def cancel_processing(self):
+        """Cancel ongoing sharpness analysis."""
+        self._cancellation_event.set()
         
     def calculate_sharpness(self, extraction_result: ExtractionResult, progress_callback=None) -> ExtractionResult:
         """
@@ -110,7 +128,7 @@ class SharpnessAnalyzer:
     
     def _process_chunk_parallel(self, frame_paths: List[str], 
                                progress_callback: Optional[Callable] = None) -> List[float]:
-        """Process a chunk of frames in parallel."""
+        """Process a chunk of frames in parallel with Windows-specific error handling."""
         scores = [0.0] * len(frame_paths)  # Initialize with default scores
         num_workers = min(self.max_workers, len(frame_paths)) if frame_paths else 1
         
@@ -120,37 +138,113 @@ class SharpnessAnalyzer:
         
         futures = {}
         try:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=num_workers) as executor:
+            # Windows-specific executor configuration
+            executor_kwargs = {'max_workers': num_workers}
+            if self._is_windows:
+                # Use context manager with explicit timeout on Windows
+                executor_kwargs.update({
+                    'thread_name_prefix': 'SharpFrames_',
+                })
+            
+            with concurrent.futures.ThreadPoolExecutor(**executor_kwargs) as executor:
                 # Submit tasks
                 for idx, path in enumerate(frame_paths):
+                    # Check for cancellation before submitting
+                    if self._cancellation_event.is_set():
+                        print("Sharpness analysis cancelled")
+                        return scores
+                        
                     future = executor.submit(self._calculate_single_frame_sharpness, path)
                     futures[future] = {"index": idx, "path": path}
                 
-                # Process completed futures
-                for future in concurrent.futures.as_completed(futures):
-                    task_info = futures[future]
-                    idx = task_info["index"]
-                    path = task_info["path"]
-                    
-                    try:
-                        score = future.result()
-                        scores[idx] = score
+                # Process completed futures with timeout on Windows
+                timeout = self._operation_timeout if self._is_windows else None
+                
+                try:
+                    for future in concurrent.futures.as_completed(futures, timeout=timeout):
+                        # Check for cancellation
+                        if self._cancellation_event.is_set():
+                            print("Sharpness analysis cancelled")
+                            # Cancel remaining futures
+                            for remaining_future in futures:
+                                remaining_future.cancel()
+                            return scores
+                            
+                        task_info = futures[future]
+                        idx = task_info["index"]
+                        path = task_info["path"]
                         
-                    except Exception as e:
-                        print(f"Warning: Failed to process {path}: {e}")
-                        scores[idx] = 0.0  # Use default score for failed frames
-                    
-                    # Update progress after each frame
-                    completed_count += 1
-                    if progress_callback:
-                        progress_callback("sharpness", completed_count, total_frames, 
-                                        f"Analyzed {completed_count}/{total_frames} frames")
+                        try:
+                            # Add timeout for individual result retrieval on Windows
+                            result_timeout = 10 if self._is_windows else None
+                            score = future.result(timeout=result_timeout)
+                            scores[idx] = score
+                            
+                        except concurrent.futures.TimeoutError:
+                            print(f"Warning: Timeout processing {path}")
+                            scores[idx] = 0.0
+                        except Exception as e:
+                            print(f"Warning: Failed to process {path}: {e}")
+                            scores[idx] = 0.0  # Use default score for failed frames
+                        
+                        # Update progress after each frame with timeout protection
+                        completed_count += 1
+                        if progress_callback:
+                            try:
+                                progress_callback("sharpness", completed_count, total_frames, 
+                                                f"Analyzed {completed_count}/{total_frames} frames")
+                            except Exception as e:
+                                print(f"Warning: Progress callback failed: {e}")
+                                
+                except concurrent.futures.TimeoutError:
+                    print(f"Warning: Overall processing timeout after {timeout} seconds")
+                    # Cancel remaining futures and return partial results
+                    for future in futures:
+                        future.cancel()
         
         except Exception as e:
-            print(f"Error in parallel processing: {e}")
+            error_msg = f"Error in parallel processing: {e}"
+            print(error_msg)
+            
+            # On Windows, try fallback to sequential processing for small datasets
+            if self._is_windows and len(frame_paths) <= 10:
+                print("Attempting fallback to sequential processing on Windows...")
+                return self._process_chunk_sequential(frame_paths, progress_callback)
             # Return zeros for all frames on complete failure
             return [0.0] * len(frame_paths)
         
+        return scores
+    
+    def _process_chunk_sequential(self, frame_paths: List[str], 
+                                 progress_callback: Optional[Callable] = None) -> List[float]:
+        """Fallback sequential processing for Windows when threading fails."""
+        scores = []
+        total_frames = len(frame_paths)
+        
+        for idx, path in enumerate(frame_paths):
+            if self._cancellation_event.is_set():
+                print("Sequential processing cancelled")
+                break
+                
+            try:
+                score = self._calculate_single_frame_sharpness(path)
+                scores.append(score)
+            except Exception as e:
+                print(f"Warning: Failed to process {path}: {e}")
+                scores.append(0.0)
+            
+            # Update progress
+            if progress_callback:
+                try:
+                    progress_callback("sharpness", idx + 1, total_frames, 
+                                    f"Analyzed {idx + 1}/{total_frames} frames (sequential)")
+                except Exception as e:
+                    print(f"Warning: Progress callback failed: {e}")
+        
+        # Pad with zeros if processing was cancelled early
+        while len(scores) < total_frames:
+            scores.append(0.0)
+            
         return scores
     
     def _calculate_single_frame_sharpness(self, frame_path: str) -> float:
@@ -167,6 +261,10 @@ class SharpnessAnalyzer:
             ImageProcessingError: If frame processing fails
         """
         try:
+            # Check for cancellation
+            if self._cancellation_event.is_set():
+                return 0.0
+                
             # Read image in grayscale
             img_gray = cv2.imread(frame_path, cv2.IMREAD_GRAYSCALE)
             if img_gray is None:

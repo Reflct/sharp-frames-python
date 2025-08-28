@@ -10,6 +10,7 @@ import sys
 import platform
 import subprocess
 import tempfile
+import logging
 from typing import Dict, Any, List, Tuple, Optional
 
 
@@ -20,6 +21,37 @@ class WindowsCompatibility:
     def is_windows() -> bool:
         """Check if running on Windows."""
         return os.name == 'nt' or sys.platform.startswith('win')
+    
+    @staticmethod
+    def setup_debug_logging() -> logging.Logger:
+        """Setup detailed logging for Windows debugging to file."""
+        logger = logging.getLogger('sharp_frames.windows_debug')
+        
+        # Only configure if not already configured
+        if not logger.handlers:
+            # Create log file in the project root
+            log_file = os.path.join(os.getcwd(), 'sharp_frames_debug.log')
+            
+            # File handler for detailed debugging
+            file_handler = logging.FileHandler(log_file, mode='w', encoding='utf-8')
+            file_formatter = logging.Formatter(
+                '[%(asctime)s] %(name)s - %(levelname)s - %(funcName)s:%(lineno)d - %(message)s'
+            )
+            file_handler.setFormatter(file_formatter)
+            logger.addHandler(file_handler)
+            
+            # Also keep console output for immediate feedback
+            console_handler = logging.StreamHandler(sys.stdout)
+            console_formatter = logging.Formatter(
+                '[%(asctime)s] SHARP_FRAMES_DEBUG - %(levelname)s - %(message)s'
+            )
+            console_handler.setFormatter(console_formatter)
+            logger.addHandler(console_handler)
+            
+            logger.setLevel(logging.DEBUG)
+            logger.info(f"Debug logging initialized. Log file: {log_file}")
+            
+        return logger
     
     @staticmethod
     def get_platform_info() -> Dict[str, str]:

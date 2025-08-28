@@ -384,11 +384,20 @@ class ProcessingScreen(Screen):
         # Set cancellation flag
         self.processing_cancelled = True
         
+        # Cancel processor operations
+        if self.processor and hasattr(self.processor, 'cancel_processing'):
+            try:
+                self.processor.cancel_processing()
+                logger.info("Processor cancellation requested")
+            except Exception as e:
+                logger.error(f"Error cancelling processor: {e}")
+        
         # Cancel any running workers
         try:
             for worker in self.workers:
                 if not worker.is_finished:
                     worker.cancel()
+                    logger.info(f"Worker {worker.name} cancellation requested")
         except Exception as e:
             logger.error(f"Error cancelling workers: {e}")
         
@@ -404,6 +413,17 @@ class ProcessingScreen(Screen):
             
         except Exception as e:
             logger.error(f"Error updating UI during cancellation: {e}")
+        
+        # Close the screen after a short delay to allow cleanup
+        def delayed_close():
+            try:
+                self.app.pop_screen()
+            except Exception as e:
+                logger.error(f"Error closing screen: {e}")
+        
+        # Schedule delayed close (give 2 seconds for cleanup)
+        import threading
+        threading.Timer(2.0, delayed_close).start()
     
     def on_unmount(self) -> None:
         """Clean up when screen is unmounted."""

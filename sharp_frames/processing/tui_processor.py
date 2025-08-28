@@ -3,6 +3,7 @@ TUI processor orchestrator for Sharp Frames two-phase processing.
 """
 
 import shutil
+import os
 from typing import Dict, Any, Optional
 
 from ..models.frame_data import ExtractionResult
@@ -22,6 +23,14 @@ class TUIProcessor:
         self.selector = FrameSelector(show_progress=False)  # Disable progress bars for thread safety
         self.saver = FrameSaver(show_progress=False)  # Disable progress bars for thread safety
         self.current_result: Optional[ExtractionResult] = None
+        self._cancelled = False
+    
+    def cancel_processing(self):
+        """Cancel ongoing processing operations."""
+        self._cancelled = True
+        # Cancel sharpness analyzer
+        if hasattr(self.analyzer, 'cancel_processing'):
+            self.analyzer.cancel_processing()
     
     def extract_and_analyze(self, config: Dict[str, Any], progress_callback=None) -> ExtractionResult:
         """
@@ -40,13 +49,28 @@ class TUIProcessor:
         try:
             print(f"Phase 1: Extracting and analyzing frames from {config['input_type']}...")
             
+            # Check for cancellation
+            if self._cancelled:
+                print("Processing cancelled during initialization")
+                return ExtractionResult(frames=[], metadata={}, temp_dir=None, input_type=config.get('input_type', 'unknown'))
+            
             # Report extraction starting
             if progress_callback:
-                progress_callback("extraction", 0, 100, "Starting frame extraction...")
+                try:
+                    progress_callback("extraction", 0, 100, "Starting frame extraction...")
+                except Exception as e:
+                    print(f"Warning: Progress callback failed: {e}")
             
             # Extract frames
             print("Extracting frames...")
             extraction_result = self.extractor.extract_frames(config, progress_callback)
+            
+            # Check for cancellation after extraction
+            if self._cancelled:
+                print("Processing cancelled after frame extraction")
+                if extraction_result.temp_dir:
+                    self.cleanup_temp_directory()
+                return ExtractionResult(frames=[], metadata={}, temp_dir=None, input_type=config.get('input_type', 'unknown'))
             
             if not extraction_result.frames:
                 print("No frames were extracted.")
@@ -57,11 +81,28 @@ class TUIProcessor:
             
             # Report analysis starting
             if progress_callback:
-                progress_callback("analysis", 0, len(extraction_result.frames), "Starting sharpness analysis...")
+                try:
+                    progress_callback("analysis", 0, len(extraction_result.frames), "Starting sharpness analysis...")
+                except Exception as e:
+                    print(f"Warning: Progress callback failed: {e}")
+            
+            # Check for cancellation before sharpness analysis
+            if self._cancelled:
+                print("Processing cancelled before sharpness analysis")
+                if extraction_result.temp_dir:
+                    self.cleanup_temp_directory()
+                return ExtractionResult(frames=[], metadata={}, temp_dir=None, input_type=config.get('input_type', 'unknown'))
             
             # Calculate sharpness scores
             print("Analyzing frame sharpness...")
-            analyzed_result = self.analyzer.calculate_sharpness(extraction_result, progress_callback)
+            try:
+                analyzed_result = self.analyzer.calculate_sharpness(extraction_result, progress_callback)
+            except Exception as e:
+                print(f"Error during sharpness analysis: {e}")
+                # Clean up and re-raise
+                if extraction_result.temp_dir:
+                    self.cleanup_temp_directory()
+                raise e
             
             print(f"Analysis complete. Average sharpness: {analyzed_result.average_sharpness:.2f}")
             print(f"Sharpness range: {analyzed_result.sharpness_range[0]:.2f} - {analyzed_result.sharpness_range[1]:.2f}")
