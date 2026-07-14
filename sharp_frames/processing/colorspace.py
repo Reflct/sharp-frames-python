@@ -300,9 +300,10 @@ def _build_hdr_to_sdr_filter(color_info: VideoColorInfo) -> str:
             "format=yuv420p"                     # Standard output format
         )
     else:
-        # Fallback: basic colorspace conversion (won't tone map properly)
-        # This is better than nothing but may clip highlights
-        filter_chain = f"colorspace=all=bt709:iall={primaries_in}:fast=0"
+        raise RuntimeError(
+            "HDR-to-SDR conversion requires FFmpeg's zscale filter. "
+            "Install an FFmpeg build with libzimg support."
+        )
 
     return filter_chain
 
@@ -311,18 +312,31 @@ def _build_wide_gamut_to_srgb_filter(color_info: VideoColorInfo) -> str:
     """
     Build wide gamut SDR (Display P3/BT.2020) to sRGB/BT.709 filter.
     """
-    # Determine input color space for the filter
-    if color_info.color_primaries == ColorPrimaries.DISPLAY_P3:
-        input_primaries = "smpte432"
-    elif color_info.color_primaries == ColorPrimaries.BT2020:
-        input_primaries = "bt2020"
-    else:
-        input_primaries = "bt709"  # Assume BT.709 if unknown
+    input_primaries = {
+        ColorPrimaries.DISPLAY_P3: "smpte432",
+        ColorPrimaries.BT2020: "bt2020",
+    }.get(color_info.color_primaries, "bt709")
+    input_transfer = {
+        TransferFunction.SRGB: "iec61966-2-1",
+        TransferFunction.BT709: "bt709",
+    }.get(color_info.transfer_function, "bt709")
+    default_matrix = (
+        "bt2020nc"
+        if color_info.color_primaries == ColorPrimaries.BT2020
+        else "bt709"
+    )
+    input_matrix = {
+        ColorMatrix.BT709: "bt709",
+        ColorMatrix.BT2020_NCL: "bt2020nc",
+        ColorMatrix.BT2020_CL: "bt2020c",
+    }.get(color_info.color_matrix, default_matrix)
 
-    # Use colorspace filter for gamut conversion (no tone mapping needed)
-    filter_chain = f"colorspace=all=bt709:iall={input_primaries}:fast=0"
-
-    return filter_chain
+    return (
+        "colorspace=all=bt709:"
+        f"ispace={input_matrix}:"
+        f"iprimaries={input_primaries}:"
+        f"itrc={input_transfer}:fast=0"
+    )
 
 
 def get_color_info_description(color_info: VideoColorInfo) -> str:

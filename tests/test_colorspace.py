@@ -1,7 +1,10 @@
 """Tests for the colorspace detection and conversion module."""
 
-import pytest
+import shutil
+import subprocess
 from unittest.mock import patch, MagicMock
+
+import pytest
 
 from sharp_frames.processing.colorspace import (
     VideoColorInfo,
@@ -198,6 +201,8 @@ class TestBuildColorspaceFilter:
         assert 'colorspace' in filter_str
         assert 'bt709' in filter_str
         assert 'smpte432' in filter_str
+        assert 'iprimaries=smpte432' in filter_str
+        assert 'iall=smpte432' not in filter_str
 
     @patch('sharp_frames.processing.colorspace.is_zscale_available', return_value=True)
     def test_hdr_filter_with_zscale(self, mock_zscale):
@@ -219,17 +224,77 @@ class TestBuildColorspaceFilter:
 
     @patch('sharp_frames.processing.colorspace.is_zscale_available', return_value=False)
     def test_hdr_filter_fallback_without_zscale(self, mock_zscale):
-        """HDR filter falls back to colorspace when zscale unavailable."""
+        """HDR conversion fails clearly when tone mapping is unavailable."""
         info = VideoColorInfo(
             color_primaries=ColorPrimaries.BT2020,
             transfer_function=TransferFunction.PQ,
             color_matrix=ColorMatrix.BT2020_NCL,
             is_hdr=True
         )
-        filter_str = build_colorspace_filter(info)
-        assert filter_str is not None
-        assert 'colorspace' in filter_str
-        assert 'zscale' not in filter_str
+        with pytest.raises(RuntimeError, match='zscale'):
+            build_colorspace_filter(info)
+
+
+@pytest.mark.skipif(shutil.which('ffmpeg') is None, reason='FFmpeg is not installed')
+class TestColorspaceFilterIntegration:
+    """Validate generated filters with a real FFmpeg process."""
+
+    @staticmethod
+    def _run_filter(source_params, filter_string):
+        source = (
+            "testsrc2=size=64x64:rate=1,format=yuv420p,"
+            f"setparams={source_params}"
+        )
+        result = subprocess.run(
+            [
+                'ffmpeg', '-hide_banner', '-loglevel', 'error',
+                '-f', 'lavfi', '-i', source,
+                '-frames:v', '1', '-vf', filter_string,
+                '-f', 'null', '-'
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert result.returncode == 0, result.stderr
+
+    def test_display_p3_filter_executes(self):
+        info = VideoColorInfo(
+            color_primaries=ColorPrimaries.DISPLAY_P3,
+            transfer_function=TransferFunction.BT709,
+            color_matrix=ColorMatrix.BT709,
+            is_hdr=False,
+        )
+        self._run_filter(
+            'color_primaries=smpte432:color_trc=bt709:colorspace=bt709',
+            build_colorspace_filter(info),
+        )
+
+    def test_bt2020_sdr_filter_executes(self):
+        info = VideoColorInfo(
+            color_primaries=ColorPrimaries.BT2020,
+            transfer_function=TransferFunction.BT709,
+            color_matrix=ColorMatrix.BT2020_NCL,
+            is_hdr=False,
+        )
+        self._run_filter(
+            'color_primaries=bt2020:color_trc=bt709:colorspace=bt2020nc',
+            build_colorspace_filter(info),
+        )
+
+    def test_hdr_filter_executes(self):
+        if not is_zscale_available():
+            pytest.skip("FFmpeg's zscale filter is not available")
+        info = VideoColorInfo(
+            color_primaries=ColorPrimaries.BT2020,
+            transfer_function=TransferFunction.PQ,
+            color_matrix=ColorMatrix.BT2020_NCL,
+            is_hdr=True,
+        )
+        self._run_filter(
+            'color_primaries=bt2020:color_trc=smpte2084:colorspace=bt2020nc',
+            build_colorspace_filter(info),
+        )
 
 
 class TestGetColorInfoDescription:
