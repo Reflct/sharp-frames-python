@@ -41,7 +41,12 @@ class SharpFramesApp(App):
     def setup_signal_handlers(self):
         """Setup signal handlers for cross-platform compatibility."""
         def signal_handler(signum, frame):
-            self.log.info(f"Received signal {signum} in main app, ignoring to prevent premature exit")
+            self.log.info(f"Received signal {signum}; cancelling active processing")
+            current_screen = self.screen_stack[-1] if self.screen_stack else None
+            if current_screen and hasattr(current_screen, 'action_cancel'):
+                current_screen.action_cancel()
+            else:
+                self.exit(result="cancelled")
         
         # Handle common signals - only use signals available on current platform
         signals_to_handle = []
@@ -50,12 +55,6 @@ class SharpFramesApp(App):
         for signal_attr in ['SIGTERM', 'SIGINT']:
             if hasattr(signal, signal_attr):
                 signals_to_handle.append(getattr(signal, signal_attr))
-        
-        # Unix/Linux specific signals (not available on Windows)
-        if os.name == 'posix':
-            for signal_attr in ['SIGUSR1', 'SIGUSR2', 'SIGHUP', 'SIGPIPE']:
-                if hasattr(signal, signal_attr):
-                    signals_to_handle.append(getattr(signal, signal_attr))
         
         for sig in signals_to_handle:
             try:
@@ -134,7 +133,7 @@ class SharpFramesApp(App):
         
         # If we just had escape sequences recently, this is likely spurious
         if current_time - self._last_escape_time < 2.0:  # Within 2 seconds of escape detection
-            self.log.info(f"Blocking cancel action - likely triggered by spurious escape sequence")
+            self.log.info("Blocking cancel action - likely triggered by spurious escape sequence")
             return
         
         self._last_action_time = current_time
@@ -214,10 +213,6 @@ class SharpFramesApp(App):
     def _get_target_input_for_step(self, config_screen: ConfigurationForm, file_path: str) -> str:
         """Determine which input field should receive the file path."""
         current_step = config_screen.get_current_step_name()
-        
-        # Check what type of path this is (Windows-safe)
-        is_directory = os.path.isdir(file_path) if os.path.exists(file_path) else file_path.endswith(('/', '\\'))
-        is_video = any(file_path.lower().endswith(ext) for ext in ['.mp4', '.avi', '.mov', '.mkv', '.webm', '.m4v'])
         
         # Normalize path separators for consistent handling
         file_path = os.path.normpath(file_path)

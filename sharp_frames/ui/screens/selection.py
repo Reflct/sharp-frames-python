@@ -61,21 +61,26 @@ class SharpnessChart(Widget):
     def render_line(self, y: int) -> "Strip":
         """Render a single line of the chart."""
         from textual.strip import Strip
-        
+
+        # Textual's monochrome/ANSI filters expect every custom segment to
+        # carry a concrete Rich style.  Unstyled padding segments render in a
+        # normal terminal, but crash newer Textual releases in no-color mode.
+        blank_style = Style()
+
         width = self.size.width
         height = self.size.height - 2  # Account for border
-        
+
         if not self.frames or width < 10 or height < 1:
-            return Strip([Segment(" " * width)])
+            return Strip([Segment(" " * width, blank_style)])
         
         # First line is the title
         if y == 0:
             title = "Frame selection - first 100"
             padding = (width - len(title)) // 2
             return Strip([
-                Segment(" " * padding),
+                Segment(" " * padding, blank_style),
                 Segment(title, Style(color="#3190FF", bold=True)),
-                Segment(" " * (width - padding - len(title)))
+                Segment(" " * (width - padding - len(title)), blank_style)
             ])
         
         # Chart content starts from line 1
@@ -110,11 +115,11 @@ class SharpnessChart(Widget):
             if should_draw:
                 segments.append(Segment("█", color))
             else:
-                segments.append(Segment(" "))
+                segments.append(Segment(" ", blank_style))
             
             # Add gap after bar (except for the last one)
             if i < num_frames - 1:
-                segments.append(Segment(" "))
+                segments.append(Segment(" ", blank_style))
         
         # Calculate total width used
         total_used = num_frames * bar_width + (num_frames - 1) * gap_width
@@ -122,7 +127,7 @@ class SharpnessChart(Widget):
         # Fill remaining space
         remaining = width - total_used
         if remaining > 0:
-            segments.append(Segment(" " * remaining))
+            segments.append(Segment(" " * remaining, blank_style))
         
         return Strip(segments)
 

@@ -9,7 +9,10 @@ from unittest.mock import Mock, patch, MagicMock
 from PIL import Image
 import cv2
 
-from sharp_frames.processing.sharpness_analyzer import SharpnessAnalyzer
+from sharp_frames.processing.sharpness_analyzer import (
+    ImageProcessingError,
+    SharpnessAnalyzer,
+)
 from sharp_frames.models.frame_data import ExtractionResult, FrameData
 from tests.fixtures import (
     test_images_directory,
@@ -124,7 +127,7 @@ class TestSharpnessAnalyzer:
         """Test error handling for invalid image files."""
         invalid_path = "/nonexistent/image.jpg"
         
-        with pytest.raises(FileNotFoundError):
+        with pytest.raises(ImageProcessingError, match="Failed to read image"):
             self.analyzer._calculate_single_frame_sharpness(invalid_path)
     
     def test_calculate_single_frame_sharpness_corrupted_image(self, tmp_path):
@@ -235,7 +238,9 @@ class TestSharpnessAnalyzer:
         
         progress_updates = []
         
-        def mock_progress_callback(current, total):
+        def mock_progress_callback(phase, current, total, description):
+            assert phase == "sharpness"
+            assert description
             progress_updates.append((current, total))
         
         with patch.object(self.analyzer, '_progress_callback', side_effect=mock_progress_callback):

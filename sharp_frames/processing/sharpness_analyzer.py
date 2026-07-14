@@ -6,7 +6,6 @@ import cv2
 import concurrent.futures
 import os
 import sys
-import time
 import threading
 from multiprocessing import cpu_count
 from typing import List, Callable, Optional
@@ -45,6 +44,10 @@ class SharpnessAnalyzer:
     def cancel_processing(self):
         """Cancel ongoing sharpness analysis."""
         self._cancellation_event.set()
+
+    def reset_cancellation(self):
+        """Prepare the analyzer for an explicitly requested new operation."""
+        self._cancellation_event.clear()
         
     def calculate_sharpness(self, extraction_result: ExtractionResult, progress_callback=None) -> ExtractionResult:
         """

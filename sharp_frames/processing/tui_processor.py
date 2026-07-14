@@ -3,7 +3,6 @@ TUI processor orchestrator for Sharp Frames two-phase processing.
 """
 
 import shutil
-import os
 from typing import Dict, Any, Optional
 
 from ..models.frame_data import ExtractionResult
@@ -28,6 +27,8 @@ class TUIProcessor:
     def cancel_processing(self):
         """Cancel ongoing processing operations."""
         self._cancelled = True
+        if hasattr(self.extractor, 'cancel_processing'):
+            self.extractor.cancel_processing()
         # Cancel sharpness analyzer
         if hasattr(self.analyzer, 'cancel_processing'):
             self.analyzer.cancel_processing()
@@ -64,17 +65,21 @@ class TUIProcessor:
             # Extract frames
             print("Extracting frames...")
             extraction_result = self.extractor.extract_frames(config, progress_callback)
+            # Own the temporary directory as soon as extraction returns. This keeps
+            # cancellation/error cleanup reliable before analysis completes.
+            self.current_result = extraction_result
             
             # Check for cancellation after extraction
             if self._cancelled:
                 print("Processing cancelled after frame extraction")
-                if extraction_result.temp_dir:
-                    self.cleanup_temp_directory()
+                self.cleanup_temp_directory()
+                self.current_result = None
                 return ExtractionResult(frames=[], metadata={}, temp_dir=None, input_type=config.get('input_type', 'unknown'))
             
             if not extraction_result.frames:
                 print("No frames were extracted.")
-                self.current_result = extraction_result
+                self.cleanup_temp_directory()
+                self.current_result = None
                 return extraction_result
             
             print(f"Extracted {len(extraction_result.frames)} frames")
@@ -89,8 +94,8 @@ class TUIProcessor:
             # Check for cancellation before sharpness analysis
             if self._cancelled:
                 print("Processing cancelled before sharpness analysis")
-                if extraction_result.temp_dir:
-                    self.cleanup_temp_directory()
+                self.cleanup_temp_directory()
+                self.current_result = None
                 return ExtractionResult(frames=[], metadata={}, temp_dir=None, input_type=config.get('input_type', 'unknown'))
             
             # Calculate sharpness scores
@@ -100,9 +105,17 @@ class TUIProcessor:
             except Exception as e:
                 print(f"Error during sharpness analysis: {e}")
                 # Clean up and re-raise
-                if extraction_result.temp_dir:
-                    self.cleanup_temp_directory()
+                self.cleanup_temp_directory()
                 raise e
+
+            if self._cancelled:
+                print("Processing cancelled during sharpness analysis")
+                self.cleanup_temp_directory()
+                self.current_result = None
+                return ExtractionResult(
+                    frames=[], metadata={}, temp_dir=None,
+                    input_type=config.get('input_type', 'unknown'),
+                )
             
             print(f"Analysis complete. Average sharpness: {analyzed_result.average_sharpness:.2f}")
             print(f"Sharpness range: {analyzed_result.sharpness_range[0]:.2f} - {analyzed_result.sharpness_range[1]:.2f}")
@@ -114,8 +127,13 @@ class TUIProcessor:
         except Exception as e:
             print(f"Error during extraction and analysis: {e}")
             # Clean up any temp directories on failure
-            if hasattr(self, 'current_result') and self.current_result and self.current_result.temp_dir:
-                self.cleanup_temp_directory()
+            self.cleanup_temp_directory()
+            self.current_result = None
+            if self._cancelled:
+                return ExtractionResult(
+                    frames=[], metadata={}, temp_dir=None,
+                    input_type=config.get('input_type', 'unknown'),
+                )
             raise e
     
     def preview_selection(self, method: str, **params) -> int:
@@ -248,6 +266,11 @@ class TUIProcessor:
         # Clean up temp directory before reset
         self.cleanup_temp_directory()
         self.current_result = None
+        self._cancelled = False
+        if hasattr(self.extractor, 'reset_cancellation'):
+            self.extractor.reset_cancellation()
+        if hasattr(self.analyzer, 'reset_cancellation'):
+            self.analyzer.reset_cancellation()
     
     def has_current_result(self) -> bool:
         """Check if there is a current extraction result."""

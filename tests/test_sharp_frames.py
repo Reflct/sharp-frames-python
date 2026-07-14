@@ -7,13 +7,109 @@ Tests the video directory processing utilities and input type detection.
 import pytest
 import os
 import tempfile
+import json
 from unittest.mock import patch, Mock
 
+import cv2
+import numpy as np
+
+from sharp_frames.sharp_frames_processor import SharpFrames
 from sharp_frames.video_utils import (
     get_video_files_in_directory,
     detect_input_type,
     SUPPORTED_VIDEO_EXTENSIONS
 )
+
+
+class TestDirectCliSaving:
+    """Direct CLI output must use the same safe encoding contract as the TUI."""
+
+    @staticmethod
+    def _write_image(path, color):
+        image = np.full((12, 16, 3), color, dtype=np.uint8)
+        assert cv2.imwrite(str(path), image)
+
+    def test_directory_images_are_transcoded_and_collision_safe(self, tmp_path):
+        input_dir = tmp_path / "input"
+        output_dir = tmp_path / "output"
+        input_dir.mkdir()
+        output_dir.mkdir()
+        png_source = input_dir / "photo.png"
+        jpg_source = input_dir / "photo.jpg"
+        self._write_image(png_source, (255, 0, 0))
+        self._write_image(jpg_source, (0, 0, 255))
+        processor = SharpFrames(
+            input_path=str(input_dir),
+            input_type="directory",
+            output_dir=str(output_dir),
+            output_format="jpg",
+            force_overwrite=True,
+        )
+        selected = [
+            {"id": path.name, "path": str(path), "index": index,
+             "sharpnessScore": 10.0 + index}
+            for index, path in enumerate((png_source, jpg_source))
+        ]
+
+        assert processor._save_frames(selected) is True
+
+        assert (output_dir / "photo.jpg").read_bytes().startswith(b"\xff\xd8\xff")
+        assert (output_dir / "photo_2.jpg").read_bytes().startswith(b"\xff\xd8\xff")
+        metadata = json.loads((output_dir / "selected_metadata.json").read_text())
+        assert metadata["total_selected"] == 2
+        assert metadata["total_saved"] == 2
+        assert metadata["total_failed"] == 0
+        assert [item["output_filename"] for item in metadata["selected_items"]] == [
+            "photo.jpg", "photo_2.jpg"
+        ]
+
+    def test_save_failure_is_reported_to_run(self, tmp_path):
+        processor = SharpFrames(
+            input_path=str(tmp_path),
+            input_type="directory",
+            output_dir=str(tmp_path / "output"),
+        )
+        selected = [{
+            "id": "missing.png",
+            "path": str(tmp_path / "missing.png"),
+            "index": 0,
+            "sharpnessScore": 1.0,
+        }]
+
+        with (
+            patch.object(processor, "_setup", return_value=True),
+            patch.object(processor, "_load_input_frames", return_value=(["input"], False)),
+            patch.object(processor, "_analyze_and_select_frames", return_value=selected),
+            patch.object(processor, "_save_frames", return_value=False),
+        ):
+            assert processor.run() is False
+
+    def test_direct_cli_uses_canonical_ffmpeg_runner(self, tmp_path):
+        processor = SharpFrames(
+            input_path=str(tmp_path / "input.mp4"),
+            input_type="video",
+            output_dir=str(tmp_path / "output"),
+            fps=5,
+            output_format="png",
+            width=640,
+        )
+        processor.temp_dir = str(tmp_path / "frames")
+
+        with patch(
+            "sharp_frames.processing.frame_extractor.FrameExtractor._run_ffmpeg_extraction",
+            return_value=True,
+        ) as extraction:
+            assert processor._extract_frames(duration=2.0) is True
+
+        extraction.assert_called_once_with(
+            processor.input_path,
+            processor.temp_dir,
+            5,
+            "png",
+            640,
+            2.0,
+            None,
+        )
 
 
 class TestVideoDirectoryUtilities:
@@ -76,7 +172,11 @@ class TestVideoDirectoryUtilities:
 
     def test_supported_video_extensions_comprehensive(self):
         """Test that all expected video extensions are supported."""
-        expected_extensions = {'.mp4', '.avi', '.mkv', '.mov', '.flv', '.wmv', '.webm'}
+        expected_extensions = frozenset({
+            '.3g2', '.3gp', '.avi', '.flv', '.m2ts', '.m4v', '.mkv', '.mov',
+            '.mp4', '.mpeg', '.mpg', '.mts', '.ogv', '.ts', '.vob', '.webm',
+            '.wmv',
+        })
         assert SUPPORTED_VIDEO_EXTENSIONS == expected_extensions
 
 
@@ -173,4 +273,4 @@ class TestVideoDirectoryIntegration:
         common_video_extensions = ['.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm']
         
         for ext in common_video_extensions:
-            assert ext in SUPPORTED_VIDEO_EXTENSIONS, f"Extension {ext} should be supported" 
+            assert ext in SUPPORTED_VIDEO_EXTENSIONS, f"Extension {ext} should be supported"

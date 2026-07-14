@@ -3,12 +3,13 @@ Validation components for Sharp Frames UI.
 """
 
 import os
-from typing import Optional, Set, List
+from typing import Optional, List
 from pathlib import Path
 
 from textual.widgets import Input
 from textual.validation import ValidationResult, Validator
 from ..utils.path_sanitizer import PathSanitizer
+from ...video_utils import SUPPORTED_IMAGE_EXTENSIONS, SUPPORTED_VIDEO_EXTENSIONS
 
 
 class PathValidator(Validator):
@@ -60,11 +61,7 @@ class PathValidator(Validator):
 class VideoFileValidator(Validator):
     """Validator specifically for video files with format checking."""
     
-    # Common video file extensions
-    SUPPORTED_VIDEO_EXTENSIONS = {
-        '.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.webm', 
-        '.m4v', '.3gp', '.ogv', '.ts', '.mts', '.m2ts'
-    }
+    SUPPORTED_VIDEO_EXTENSIONS = SUPPORTED_VIDEO_EXTENSIONS
     
     def __init__(self, must_exist: bool = True):
         self.must_exist = must_exist
@@ -190,11 +187,7 @@ class VideoDirectoryValidator(Validator):
 class ImageDirectoryValidator(Validator):
     """Validator for directories containing image files."""
     
-    # Common image file extensions
-    SUPPORTED_IMAGE_EXTENSIONS = {
-        '.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif', 
-        '.webp', '.gif', '.ppm', '.pgm', '.pbm'
-    }
+    SUPPORTED_IMAGE_EXTENSIONS = SUPPORTED_IMAGE_EXTENSIONS
     
     def __init__(self, must_exist: bool = True, min_images: int = 1):
         self.must_exist = must_exist
@@ -405,4 +398,4 @@ class ValidationHelpers:
         elif input_type == "directory":
             return ImageDirectoryValidator(must_exist=must_exist)
         else:
-            return PathValidator(must_exist=must_exist) 
+            return PathValidator(must_exist=must_exist)

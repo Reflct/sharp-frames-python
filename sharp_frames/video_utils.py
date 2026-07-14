@@ -5,10 +5,43 @@ Provides utilities for detecting and processing video files in directories.
 """
 
 import os
-from typing import List
+import platform
+from typing import List, Optional
 
-# Supported video extensions for video directory processing
-SUPPORTED_VIDEO_EXTENSIONS = {'.mp4', '.avi', '.mkv', '.mov', '.flv', '.wmv', '.webm'}
+# Keep media-format support in one place so validation and processing cannot drift.
+SUPPORTED_VIDEO_EXTENSIONS = frozenset({
+    '.3g2', '.3gp', '.avi', '.flv', '.m2ts', '.m4v', '.mkv', '.mov',
+    '.mp4', '.mpeg', '.mpg', '.mts', '.ogv', '.ts', '.vob', '.webm', '.wmv',
+})
+
+SUPPORTED_IMAGE_EXTENSIONS = frozenset({
+    '.bmp', '.jpeg', '.jpg', '.pbm', '.pgm', '.png', '.ppm', '.tif',
+    '.tiff', '.webp',
+})
+
+
+def get_ffmpeg_installation_hint(system_name: Optional[str] = None) -> str:
+    """Return platform-appropriate installation guidance for FFmpeg tools."""
+    current_system = system_name or platform.system()
+    if current_system == 'Windows':
+        return (
+            "Install a full FFmpeg build from https://ffmpeg.org/download.html "
+            "and add its bin directory to PATH."
+        )
+    if current_system == 'Darwin':
+        return (
+            "Install FFmpeg and FFprobe with `brew install ffmpeg`, then ensure "
+            "Homebrew's bin directory is on your system PATH."
+        )
+    if current_system == 'Linux':
+        return (
+            "Install FFmpeg with your package manager (for example, "
+            "`sudo apt install ffmpeg`) and ensure it is on your system PATH."
+        )
+    return (
+        "Install a full FFmpeg distribution from https://ffmpeg.org/download.html "
+        "and add it to PATH."
+    )
 
 
 def get_video_files_in_directory(directory_path: str) -> List[str]:
@@ -39,4 +72,4 @@ def detect_input_type(input_path: str) -> str:
         else:
             return "directory"  # Assume image directory
     else:
-        raise ValueError(f"Input path is neither a file nor a directory: {input_path}") 
+        raise ValueError(f"Input path is neither a file nor a directory: {input_path}")

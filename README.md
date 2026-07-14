@@ -14,10 +14,12 @@ Or with pipx for isolated installation:
 pipx install sharp-frames
 ```
 
-**IMPORTANT: Video Processing Requirement**: Install FFmpeg separately for video input support.
+**IMPORTANT: Video Processing Requirement**: Install an FFmpeg distribution that includes both `ffmpeg` and `ffprobe`. Both executables must be on `PATH`; image-directory processing does not require them.
 - **Windows**: Download from [FFmpeg website](https://ffmpeg.org/download.html) and add to PATH
 - **macOS**: `brew install ffmpeg`
 - **Linux**: `sudo apt install ffmpeg`
+
+HDR-to-SDR extraction additionally requires an FFmpeg build with the `zscale` filter (`libzimg`). You can verify support with `ffmpeg -filters | grep zscale`. Non-HDR video processing does not require `zscale`.
 
 ## Quick Start
 
@@ -45,9 +47,9 @@ sharp-frames <input> <output> [options]
 ```
 
 **Input Types:**
-- Video files: `.mp4`, `.avi`, `.mov`, `.mkv`, `.wmv`, `.flv`, `.webm`, `.m4v`, etc.
+- Video files: `.mp4`, `.avi`, `.mov`, `.mkv`, `.wmv`, `.flv`, `.webm`, `.m4v`, `.3gp`, `.3g2`, `.ogv`, `.ts`, `.mts`, `.m2ts`, `.mpg`, `.mpeg`, `.vob`
 - Video directories: Processes all videos in a folder
-- Image directories: `.jpg`, `.jpeg`, `.png`, `.bmp`, `.tiff`, `.webp`, etc.
+- Image directories: `.jpg`, `.jpeg`, `.png`, `.bmp`, `.tif`, `.tiff`, `.webp`, `.ppm`, `.pgm`, `.pbm`
 
 ## Selection Methods
 
@@ -79,7 +81,7 @@ Removes unusually blurry frames by comparing each frame to its neighbors.
 
 ### Selection Method Parameters
 - `--num-frames <int>`: Number of frames to select (best-n, default: 300)
-- `--min-buffer <int>`: Minimum gap between selected frames (best-n, default: 3)
+- `--min-buffer <int>`: Minimum number of intervening frames between selected frames (best-n, default: 3)
 - `--batch-size <int>`: Frames per batch (batched, default: 5)
 - `--batch-buffer <int>`: Frames to skip between batches (batched, default: 2)
 - `--outlier-window-size <int>`: Neighbor comparison window (outlier-removal, default: 15)
@@ -125,9 +127,10 @@ sharp-frames photos selected --selection-method outlier-removal --outlier-sensit
 
 ## Requirements
 
-- Python 3.7 or higher
+- Python 3.10 or higher
 - Dependencies installed automatically: `opencv-python`, `numpy`, `tqdm`, `textual`
-- FFmpeg (for video processing only)
+- FFmpeg and FFprobe (for video processing only)
+- FFmpeg `zscale`/`libzimg` support (for HDR-to-SDR processing only)
 
 ## How It Works
 
@@ -141,7 +144,7 @@ sharp-frames photos selected --selection-method outlier-removal --outlier-sensit
 
 - Selected frames/images with descriptive filenames
 - `selected_metadata.json` with processing details, parameters, and sharpness scores
-- Preserves original formats for image directory input
+- Transcodes selected images to the configured output format (`jpg` by default)
 - Automatic output directory creation with permission validation
 
 ## Help & Support

@@ -8,7 +8,7 @@ actionable error messages when things go wrong.
 import os
 import tempfile
 import pytest
-from unittest.mock import patch, Mock, MagicMock
+from unittest.mock import call, patch, Mock, MagicMock
 
 from sharp_frames.ui.utils.error_analysis import ErrorContext
 
@@ -326,13 +326,21 @@ class TestErrorContextDependencyChecks:
         result = ErrorContext.check_system_dependencies()
         assert result is None  # No error means success
         
-        # Verify FFmpeg was checked
-        mock_subprocess['run'].assert_called_with(
-            ['ffmpeg', '-version'], 
-            capture_output=True, 
-            text=True, 
-            timeout=10
-        )
+        # Both executables are required for video input.
+        mock_subprocess['run'].assert_has_calls([
+            call(
+                ['ffmpeg', '-version'],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            ),
+            call(
+                ['ffprobe', '-version'],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            ),
+        ])
     
     def test_ffmpeg_not_found(self, mock_subprocess):
         """Test FFmpeg not found error."""
@@ -422,4 +430,4 @@ class TestErrorContextDependencyChecks:
             result = ErrorContext.check_system_dependencies()
             assert result is not None
             assert "missing dependency" in result.lower()
-            assert "unknown_module" in result.lower() 
+            assert "unknown_module" in result.lower()

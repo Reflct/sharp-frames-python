@@ -44,8 +44,17 @@ class MinimalProgressSharpFrames(SharpFrames):
         existing_files = os.listdir(self.output_dir)
         
         if existing_files and not self.force_overwrite:
-            print(f"Warning: Output directory '{self.output_dir}' already contains {len(existing_files)} files.")
-            print("Files may be overwritten. Use force overwrite option in configuration to suppress this warning.")
+            conflicting_paths = [
+                os.path.join(self.output_dir, filename)
+                for filename in sorted(existing_files)
+            ]
+            print(
+                f"Error: Output directory '{self.output_dir}' already contains "
+                f"{len(existing_files)} file(s). No files were written."
+            )
+            print("Conflicting files: " + ", ".join(conflicting_paths))
+            print("Choose an empty directory or enable force overwrite.")
+            raise SystemExit(1)
         elif existing_files and self.force_overwrite:
             print(f"Output directory '{self.output_dir}' contains {len(existing_files)} files. Overwriting without confirmation (force overwrite enabled).")
     
@@ -60,11 +69,12 @@ class MinimalProgressSharpFrames(SharpFrames):
                     print("Error: FFmpeg is not installed or not in PATH. Required for video input.")
                     return False
 
-                # Check for FFprobe (warning only if missing)
+                # FFprobe supplies required stream and color metadata.
                 try:
                     subprocess.run(["ffprobe", "-version"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, text=True)
                 except (subprocess.SubprocessError, FileNotFoundError):
-                    print("Warning: FFprobe is not installed or not in PATH. Video duration cannot be determined.")
+                    print("Error: FFprobe is not installed or not in PATH. Required for video input.")
+                    return False
 
             # Always check for OpenCV (needed for sharpness calculation)
             try:
@@ -245,7 +255,26 @@ class MinimalProgressSharpFrames(SharpFrames):
         return True
     
     def _extract_frames(self, duration: float = None, color_info=None) -> bool:
-        """Override to add real-time progress tracking to frame extraction with proper cleanup."""
+        """Extract through the canonical FFmpeg runner with UI-safe progress."""
+        from .frame_extractor import FrameExtractor
+
+        extractor = FrameExtractor()
+        extractor.progress_callback = self._update_progress
+        success = extractor._run_ffmpeg_extraction(
+            self.input_path,
+            self.temp_dir,
+            self.fps,
+            self.output_format,
+            self.width,
+            duration,
+            color_info,
+        )
+        if not success:
+            raise RuntimeError(f"Frame extraction failed for {self.input_path}")
+        return True
+
+    def _extract_frames_legacy(self, duration: float = None, color_info=None) -> bool:
+        """Deprecated pre-canonical FFmpeg runner retained for compatibility tests."""
         output_pattern = os.path.join(self.temp_dir, f"frame_%05d.{self.output_format}")
 
         # Build command and estimate progress
@@ -443,19 +472,22 @@ class MinimalProgressSharpFrames(SharpFrames):
 
         return sorted(selected_frames, key=lambda f: f["index"])
     
-    def _save_frames(self, selected_frames: List[Dict[str, Any]], progress_bar=None) -> None:
+    def _save_frames(self, selected_frames: List[Dict[str, Any]], progress_bar=None) -> bool:
         """Override to add progress tracking and avoid tqdm."""
         if not selected_frames:
-            return
+            return True
 
         total_frames = len(selected_frames)
         self._update_progress("saving", 0, total_frames, "Starting to save frames")
         
         # Call parent method but pass None to avoid tqdm
-        super()._save_frames(selected_frames, None)
-        
-        # Final progress update
-        self._update_progress("saving", total_frames, total_frames, f"Saved {total_frames} frames")
+        success = super()._save_frames(selected_frames, None)
+        if success:
+            self._update_progress(
+                "saving", total_frames, total_frames,
+                f"Saved {total_frames} frames",
+            )
+        return success
 
     def run(self):
         """Override the parent run() method to avoid tqdm usage in UI context."""
@@ -490,7 +522,9 @@ class MinimalProgressSharpFrames(SharpFrames):
 
             # Save Phase - Use our UI-safe save method instead of tqdm
             print(f"Saving {len(selected_frames_data)} selected frames/images...")
-            self._save_frames(selected_frames_data, None)
+            if not self._save_frames(selected_frames_data, None):
+                print("One or more selected items could not be saved.")
+                return False
 
             print(f"Successfully processed. Selected items saved to: {self.output_dir}")
             self._update_progress("complete", 1, 1, "Processing complete")
@@ -512,4 +546,4 @@ class MinimalProgressSharpFrames(SharpFrames):
                     shutil.rmtree(self.temp_dir)
                     print(f"Cleaned up temporary directory: {self.temp_dir}")
                 except Exception as e:
-                    print(f"Warning: Could not clean up temporary directory: {str(e)}") 
+                    print(f"Warning: Could not clean up temporary directory: {str(e)}")

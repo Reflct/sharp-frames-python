@@ -5,8 +5,7 @@ Updated processing screen for Sharp Frames UI with two-phase support.
 import threading
 import logging
 import traceback
-import os
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 from textual.app import ComposeResult
 from textual.containers import Container
@@ -14,7 +13,7 @@ from textual.widgets import Header, Footer, Button, Static, ProgressBar
 from textual.screen import Screen
 from textual.binding import Binding
 
-from ..constants import WorkerNames, ProcessingPhases
+from ..constants import WorkerNames
 from ..utils import ErrorContext
 from .selection import SelectionScreen
 
@@ -157,7 +156,9 @@ class ProcessingScreen(Screen):
         
         # Check system dependencies
         try:
-            dependency_error = ErrorContext.check_system_dependencies()
+            dependency_error = ErrorContext.check_system_dependencies(
+                require_video_tools=config.get('input_type') in {'video', 'video_directory'}
+            )
             if dependency_error:
                 logger.error(f"System dependency error: {dependency_error}")
                 return False
@@ -177,7 +178,11 @@ class ProcessingScreen(Screen):
         try:
             logger.info("Creating TUIProcessor...")
             self.processor = TUIProcessor()
-            
+
+            if self.processing_cancelled:
+                self.processor.cancel_processing()
+                logger.info("Phase 1 was cancelled before processor startup completed")
+                return False
             logger.info("Starting extraction and analysis...")
             
             # Create progress callback
@@ -338,7 +343,7 @@ class ProcessingScreen(Screen):
         phase_text = self.query_one("#phase-text")
         progress_bar = self.query_one("#progress-bar")
         
-        status_text.update(f"❌ Phase 1 Error")
+        status_text.update("❌ Phase 1 Error")
         phase_text.update(error_msg)
         progress_bar.update(progress=0)
         self.query_one("#cancel-processing").label = "Close"
@@ -414,16 +419,8 @@ class ProcessingScreen(Screen):
         except Exception as e:
             logger.error(f"Error updating UI during cancellation: {e}")
         
-        # Close the screen after a short delay to allow cleanup
-        def delayed_close():
-            try:
-                self.app.pop_screen()
-            except Exception as e:
-                logger.error(f"Error closing screen: {e}")
-        
-        # Schedule delayed close (give 2 seconds for cleanup)
-        import threading
-        threading.Timer(2.0, delayed_close).start()
+        # Keep the screen mounted until the worker acknowledges cancellation so
+        # its subprocess and temporary-directory cleanup can complete safely.
     
     def on_unmount(self) -> None:
         """Clean up when screen is unmounted."""

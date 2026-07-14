@@ -6,6 +6,8 @@ import os
 import subprocess
 from typing import Optional, Dict, Any
 
+from ...video_utils import SUPPORTED_IMAGE_EXTENSIONS, get_ffmpeg_installation_hint
+
 
 class ErrorContext:
     """Class to analyze errors and provide user-friendly messages."""
@@ -72,9 +74,11 @@ class ErrorContext:
             
             # Check if directory has images
             try:
-                image_extensions = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.webp'}
                 files = os.listdir(input_path)
-                image_files = [f for f in files if os.path.splitext(f.lower())[1] in image_extensions]
+                image_files = [
+                    f for f in files
+                    if os.path.splitext(f.lower())[1] in SUPPORTED_IMAGE_EXTENSIONS
+                ]
                 if not image_files:
                     return f"No image files found in directory: {input_path}"
             except Exception:
@@ -108,19 +112,15 @@ class ErrorContext:
         return "Processing failed due to an unexpected error. Check input files and system resources."
     
     @staticmethod
-    def check_system_dependencies() -> Optional[str]:
+    def check_system_dependencies(require_video_tools: bool = True) -> Optional[str]:
         """Check system dependencies and return error message if issues found."""
-        # Check FFmpeg
-        try:
-            result = subprocess.run(['ffmpeg', '-version'], capture_output=True, text=True, timeout=10)
-            if result.returncode != 0:
-                return "FFmpeg is installed but not working properly. Try reinstalling FFmpeg."
-        except subprocess.TimeoutExpired:
-            return "FFmpeg check timed out. FFmpeg might be corrupted."
-        except FileNotFoundError:
-            return "FFmpeg not found. Please install FFmpeg and add it to your system PATH."
-        except Exception as e:
-            return f"Error checking FFmpeg: {str(e)}"
+        if require_video_tools:
+            dependency_error = ErrorContext._check_video_tool('ffmpeg', 'FFmpeg')
+            if dependency_error:
+                return dependency_error
+            dependency_error = ErrorContext._check_video_tool('ffprobe', 'FFprobe')
+            if dependency_error:
+                return dependency_error
         
         # Check OpenCV (basic import test)
         try:
@@ -142,4 +142,26 @@ class ErrorContext:
         except Exception as e:
             return f"Error checking OpenCV: {str(e)}"
         
-        return None  # No issues found 
+        return None  # No issues found
+
+    @staticmethod
+    def _check_video_tool(executable: str, display_name: str) -> Optional[str]:
+        """Verify a required video executable can run."""
+        try:
+            result = subprocess.run(
+                [executable, '-version'], capture_output=True, text=True, timeout=10
+            )
+            if result.returncode != 0:
+                return (
+                    f"{display_name} is installed but not working properly. "
+                    f"Try reinstalling {display_name}."
+                )
+        except subprocess.TimeoutExpired:
+            return f"{display_name} check timed out. {display_name} might be corrupted."
+        except FileNotFoundError:
+            return (
+                f"{display_name} not found. {get_ffmpeg_installation_hint()}"
+            )
+        except Exception as e:
+            return f"Error checking {display_name}: {str(e)}"
+        return None
