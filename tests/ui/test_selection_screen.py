@@ -185,6 +185,10 @@ async def test_chart_scrolls_across_thousands_of_frames():
         assert chart.max_scroll_x > 9_000
         assert chart.max_scroll_y == 0
         assert chart.render_line(1).cell_length == chart.size.width
+        background_style = chart.get_component_rich_style(
+            "sharpness-chart--background"
+        )
+        assert background_style.bgcolor is not None
         assert "Frames 1-39 of 5,000" in chart.render_line(0).text
         bottom_line = chart.render_line(chart.scrollable_content_region.height - 1)
         assert bottom_line.text[:8] == "█ █ █ █ "

@@ -44,6 +44,7 @@ class SharpnessChart(ScrollView):
     ]
 
     COMPONENT_CLASSES = {
+        "sharpness-chart--background",
         "sharpness-chart--selected",
         "sharpness-chart--unselected",
         "sharpness-chart--title",
@@ -57,10 +58,16 @@ class SharpnessChart(ScrollView):
         margin: 1 0;
         overflow-x: auto;
         overflow-y: hidden;
+        background: $background;
     }
 
     SharpnessChart:focus {
         border: tall $accent;
+    }
+
+    SharpnessChart .sharpness-chart--background {
+        color: $background;
+        background: $background;
     }
 
     SharpnessChart .sharpness-chart--selected {
@@ -69,7 +76,7 @@ class SharpnessChart(ScrollView):
     }
 
     SharpnessChart .sharpness-chart--unselected {
-        color: $primary-darken-2;
+        color: $text-muted;
     }
 
     SharpnessChart .sharpness-chart--title {
@@ -133,7 +140,9 @@ class SharpnessChart(ScrollView):
 
     def render_line(self, y: int) -> Strip:
         """Render only the visible frame window at the current scroll offset."""
-        blank_style = Style()
+        blank_style = self.get_component_rich_style(
+            "sharpness-chart--background"
+        )
         width = self.size.width
         viewport_height = self.scrollable_content_region.height
         if width < 1 or y >= viewport_height:
