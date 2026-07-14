@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
+from textual.app import App, ComposeResult
 
 from sharp_frames.models.frame_data import ExtractionResult, FrameData
 from sharp_frames.ui.screens.selection import (
@@ -151,15 +152,55 @@ def test_selection_preview_message_preserves_payload(screen):
     assert message.params == {"n": 14, "min_buffer": 3}
 
 
-def test_chart_normalizes_scores_and_caps_rendered_frame_count(extraction_result):
-    frames = extraction_result.frames * 6
-    chart = SharpnessChart(frames, selected_indices={2, 4}, max_frames=100)
+def test_chart_normalizes_scores_without_discarding_frames(extraction_result):
+    frames = [
+        FrameData(f"/tmp/frame_{index:05d}.jpg", index, float(index + 1))
+        for index in range(5_000)
+    ]
+    chart = SharpnessChart(frames, selected_indices={2, 4, 4_999})
 
-    assert len(chart.frames) == 100
+    assert len(chart.frames) == 5_000
+    assert chart.virtual_size.width == 5_000
     assert chart.min_score == 1.0
-    assert chart.max_score == 20.0
-    assert chart.score_range == 19.0
-    assert chart.selected_indices == {2, 4}
+    assert chart.max_score == 5_000.0
+    assert chart.score_range == 4_999.0
+    assert chart.selected_indices == {2, 4, 4_999}
+
+
+@pytest.mark.asyncio
+async def test_chart_scrolls_across_thousands_of_frames():
+    frames = [
+        FrameData(f"/tmp/frame_{index:05d}.jpg", index, float(index + 1))
+        for index in range(5_000)
+    ]
+    chart = SharpnessChart(frames)
+
+    class ChartApp(App):
+        def compose(self) -> ComposeResult:
+            yield chart
+
+    async with ChartApp().run_test(size=(80, 24)) as pilot:
+        await pilot.pause()
+
+        assert chart.max_scroll_x > 4_000
+        assert chart.max_scroll_y == 0
+        assert chart.render_line(1).cell_length == chart.size.width
+        bottom_line = chart.render_line(chart.scrollable_content_region.height - 1)
+        assert bottom_line.text[0] == "█"
+
+        chart.focus()
+        await pilot.press("right")
+        await pilot.pause(0.1)
+        assert chart.scroll_offset.x > 0
+
+        await pilot.press("end")
+        await pilot.pause()
+        assert chart.is_horizontal_scroll_end
+        assert chart.render_line(0).text.rstrip().endswith("of 5,000")
+
+        await pilot.press("home")
+        await pilot.pause()
+        assert chart.scroll_offset.x == 0
 
 
 def test_input_with_controls_retains_value_before_mount():

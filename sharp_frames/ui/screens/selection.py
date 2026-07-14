@@ -8,9 +8,13 @@ from typing import Dict, Any, Optional, List
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal
+from textual.css.query import NoMatches
+from textual.events import Resize
+from textual.geometry import Size
 from textual.message import Message
 from textual.reactive import reactive
 from textual.screen import Screen
+from textual.scroll_view import ScrollView
 from textual.strip import Strip
 from textual.widget import Widget
 from textual.widgets import (
@@ -24,112 +28,169 @@ from ...models.frame_data import ExtractionResult, FrameData
 from ...processing.tui_processor import TUIProcessor
 
 
-class SharpnessChart(Widget):
-    """Bar chart widget to display sharpness scores and selection status."""
-    
+class SharpnessChart(ScrollView):
+    """Horizontally scrollable frame-by-frame sharpness timeline."""
+
+    can_focus = True
+
+    BINDINGS = [
+        Binding("left", "scroll_left", "Scroll Left", show=False),
+        Binding("right", "scroll_right", "Scroll Right", show=False),
+        Binding("ctrl+pageup", "page_left", "Page Left", show=False),
+        Binding("ctrl+pagedown", "page_right", "Page Right", show=False),
+        Binding("home", "first_frame", "First Frame", show=False),
+        Binding("end", "last_frame", "Last Frame", show=False),
+    ]
+
+    COMPONENT_CLASSES = {
+        "sharpness-chart--selected",
+        "sharpness-chart--unselected",
+        "sharpness-chart--title",
+    }
+
     DEFAULT_CSS = """
     SharpnessChart {
         height: 12;
         width: 100%;
         border: solid $primary;
         margin: 1 0;
+        overflow-x: auto;
+        overflow-y: hidden;
+    }
+
+    SharpnessChart:focus {
+        border: tall $accent;
+    }
+
+    SharpnessChart .sharpness-chart--selected {
+        color: $primary-lighten-2;
+        text-style: bold;
+    }
+
+    SharpnessChart .sharpness-chart--unselected {
+        color: $text-muted;
+    }
+
+    SharpnessChart .sharpness-chart--title {
+        color: $primary;
+        text-style: bold;
     }
     """
-    
-    def __init__(self, frames: List[FrameData], selected_indices: set = None, max_frames: int = 100, **kwargs):
+
+    def __init__(
+        self,
+        frames: List[FrameData],
+        selected_indices: Optional[set[int]] = None,
+        **kwargs,
+    ) -> None:
         super().__init__(**kwargs)
-        self.frames = frames[:max_frames]  # Only show first 100 frames
-        self.selected_indices = selected_indices or set()
-        self.max_frames = max_frames
-        
-        # Calculate min and max sharpness for normalization
+        self.frames = frames
+        self.selected_indices = set(selected_indices or ())
+        self.virtual_size = Size(max(len(frames), 1), 1)
+        self.border_title = f"Frame selection - {len(frames):,} analyzed"
+        self.border_subtitle = "Arrows scroll | Ctrl+PgUp/PgDn page | Home/End"
+
         if self.frames:
             scores = [f.sharpness_score for f in self.frames]
             self.min_score = min(scores)
             self.max_score = max(scores)
-            self.score_range = self.max_score - self.min_score if self.max_score > self.min_score else 1
+            self.score_range = max(self.max_score - self.min_score, 1)
         else:
             self.min_score = 0
             self.max_score = 1
             self.score_range = 1
-    
-    def update_selection(self, selected_indices: set):
+
+    def on_resize(self, _event: Resize) -> None:
+        """Keep the virtual canvas as tall as the visible chart."""
+        scrollbar_rows = int(len(self.frames) > self.size.width)
+        self.virtual_size = Size(
+            max(len(self.frames), 1),
+            max(self.size.height - scrollbar_rows, 1),
+        )
+
+    def update_selection(self, selected_indices: set[int]) -> None:
         """Update the selection status and refresh the chart."""
-        self.selected_indices = selected_indices
+        self.selected_indices = set(selected_indices)
         self.refresh()
-    
-    def render_line(self, y: int) -> "Strip":
-        """Render a single line of the chart."""
-        from textual.strip import Strip
 
-        # Textual's monochrome/ANSI filters expect every custom segment to
-        # carry a concrete Rich style.  Unstyled padding segments render in a
-        # normal terminal, but crash newer Textual releases in no-color mode.
+    def action_first_frame(self) -> None:
+        """Scroll directly to the beginning of the analyzed timeline."""
+        self.scroll_to(x=0, animate=False)
+
+    def action_last_frame(self) -> None:
+        """Scroll directly to the end of the analyzed timeline."""
+        self.scroll_to(x=self.max_scroll_x, animate=False)
+
+    def render_line(self, y: int) -> Strip:
+        """Render only the visible frame window at the current scroll offset."""
         blank_style = Style()
-
         width = self.size.width
-        height = self.size.height - 2  # Account for border
+        viewport_height = self.scrollable_content_region.height
+        if width < 1 or y >= viewport_height:
+            return Strip([], 0)
 
-        if not self.frames or width < 10 or height < 1:
-            return Strip([Segment(" " * width, blank_style)])
-        
-        # First line is the title
+        start, stop = self._visible_frame_range(width)
         if y == 0:
-            title = "Frame selection - first 100"
-            padding = (width - len(title)) // 2
-            return Strip([
-                Segment(" " * padding, blank_style),
-                Segment(title, Style(color="#3190FF", bold=True)),
-                Segment(" " * (width - padding - len(title)), blank_style)
-            ])
-        
-        # Chart content starts from line 1
+            return self._render_window_title(width, start, stop, blank_style)
+
+        if not self.frames:
+            return Strip([Segment(" " * width, blank_style)], width)
+
         chart_y = y - 1
-        chart_height = height - 1  # Reserve first line for title
-        
-        # Calculate bar dimensions
-        num_frames = min(len(self.frames), 100)  # Max 100 frames
-        bar_width = 1  # Each bar is 1 character wide
-        gap_width = 1  # 1 character gap between bars
-        
-        segments = []
-        
-        for i in range(num_frames):
-            frame = self.frames[i]
-            
-            # Normalize sharpness score to chart height
+        chart_height = max(viewport_height - 1, 1)
+        selected_style = self.get_component_rich_style(
+            "sharpness-chart--selected"
+        )
+        unselected_style = self.get_component_rich_style(
+            "sharpness-chart--unselected"
+        )
+        segments: list[Segment] = []
+
+        for frame in self.frames[start:stop]:
             normalized_score = (frame.sharpness_score - self.min_score) / self.score_range
-            bar_height = int(normalized_score * chart_height)
-            
-            # Determine if we should draw the bar at this y position
-            # chart_y=0 is top of chart, chart_height-1 is bottom
+            bar_height = 1 + int(normalized_score * (chart_height - 1))
             should_draw = (chart_height - 1 - chart_y) < bar_height
-            
-            # Choose color based on selection status
-            if frame.index in self.selected_indices:
-                color = Style(color="white", bold=True)
-            else:
-                color = Style(color="#666666")  # Light grey for unselected
-            
-            # Draw the bar
-            if should_draw:
-                segments.append(Segment("█", color))
-            else:
-                segments.append(Segment(" ", blank_style))
-            
-            # Add gap after bar (except for the last one)
-            if i < num_frames - 1:
-                segments.append(Segment(" ", blank_style))
-        
-        # Calculate total width used
-        total_used = num_frames * bar_width + (num_frames - 1) * gap_width
-        
-        # Fill remaining space
-        remaining = width - total_used
-        if remaining > 0:
-            segments.append(Segment(" " * remaining, blank_style))
-        
-        return Strip(segments)
+            style = (
+                selected_style
+                if frame.index in self.selected_indices
+                else unselected_style
+            )
+            segments.append(Segment("█" if should_draw else " ", style))
+
+        padding = width - (stop - start)
+        if padding > 0:
+            segments.append(Segment(" " * padding, blank_style))
+        return Strip(segments, width)
+
+    def _visible_frame_range(self, width: int) -> tuple[int, int]:
+        """Return the frame positions represented by the visible viewport."""
+        start = min(int(self.scroll_offset.x), len(self.frames))
+        return start, min(start + width, len(self.frames))
+
+    def _render_window_title(
+        self,
+        width: int,
+        start: int,
+        stop: int,
+        blank_style: Style,
+    ) -> Strip:
+        """Render a centered description of the visible timeline window."""
+        if not self.frames:
+            title = "No analyzed frames"
+        else:
+            title = f"Frames {start + 1:,}-{stop:,} of {len(self.frames):,}"
+        title = title[:width]
+        left_padding = max((width - len(title)) // 2, 0)
+        right_padding = width - left_padding - len(title)
+        title_style = self.get_component_rich_style("sharpness-chart--title")
+        return Strip(
+            [
+                Segment(" " * left_padding, blank_style),
+                Segment(title, title_style),
+                Segment(" " * right_padding, blank_style),
+            ],
+            width,
+        )
 
 
 class InputWithControls(Widget):
@@ -230,7 +291,7 @@ class InputWithControls(Widget):
         try:
             input_widget = self.query_one(f"#{self.input_id}", Input)
             return input_widget.value
-        except:
+        except NoMatches:
             return self._value
     
     @value.setter
@@ -240,7 +301,7 @@ class InputWithControls(Widget):
         try:
             input_widget = self.query_one(f"#{self.input_id}", Input)
             input_widget.value = new_value
-        except:
+        except NoMatches:
             pass
 
 
@@ -329,11 +390,10 @@ class SelectionScreen(Screen):
                 yield Static("Select Frames", classes="title_left")
                 yield Static(f"Choose from {total_frames:,} analyzed frames", classes="title_right")
             
-            # Sharpness chart - shows first 100 frames
+            # Sharpness chart - one horizontally scrollable column per frame
             yield SharpnessChart(
                 self.extraction_result.frames,
                 selected_indices=self.selected_indices,
-                max_frames=100,
                 id="sharpness_chart"
             )
             
@@ -608,7 +668,7 @@ The preview count updates instantly as you make changes, so you can experiment f
                 try:
                     input_field = first_input.query_one(Input)
                     input_field.focus()
-                except:
+                except NoMatches:
                     first_input.focus()
                     
         except Exception as e:
