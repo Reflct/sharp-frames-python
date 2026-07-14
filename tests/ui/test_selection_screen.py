@@ -160,7 +160,7 @@ def test_chart_normalizes_scores_without_discarding_frames(extraction_result):
     chart = SharpnessChart(frames, selected_indices={2, 4, 4_999})
 
     assert len(chart.frames) == 5_000
-    assert chart.virtual_size.width == 5_000
+    assert chart.virtual_size.width == 10_000
     assert chart.min_score == 1.0
     assert chart.max_score == 5_000.0
     assert chart.score_range == 4_999.0
@@ -182,16 +182,18 @@ async def test_chart_scrolls_across_thousands_of_frames():
     async with ChartApp().run_test(size=(80, 24)) as pilot:
         await pilot.pause()
 
-        assert chart.max_scroll_x > 4_000
+        assert chart.max_scroll_x > 9_000
         assert chart.max_scroll_y == 0
         assert chart.render_line(1).cell_length == chart.size.width
+        assert "Frames 1-39 of 5,000" in chart.render_line(0).text
         bottom_line = chart.render_line(chart.scrollable_content_region.height - 1)
-        assert bottom_line.text[0] == "█"
+        assert bottom_line.text[:8] == "█ █ █ █ "
 
         chart.focus()
         await pilot.press("right")
         await pilot.pause(0.1)
-        assert chart.scroll_offset.x > 0
+        assert chart.scroll_offset.x == SharpnessChart.FRAME_STRIDE
+        assert "Frames 2-40 of 5,000" in chart.render_line(0).text
 
         await pilot.press("end")
         await pilot.pause()

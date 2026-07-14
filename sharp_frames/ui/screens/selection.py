@@ -31,6 +31,7 @@ from ...processing.tui_processor import TUIProcessor
 class SharpnessChart(ScrollView):
     """Horizontally scrollable frame-by-frame sharpness timeline."""
 
+    FRAME_STRIDE = 2
     can_focus = True
 
     BINDINGS = [
@@ -68,7 +69,7 @@ class SharpnessChart(ScrollView):
     }
 
     SharpnessChart .sharpness-chart--unselected {
-        color: $text-muted;
+        color: $primary-darken-2;
     }
 
     SharpnessChart .sharpness-chart--title {
@@ -86,7 +87,8 @@ class SharpnessChart(ScrollView):
         super().__init__(**kwargs)
         self.frames = frames
         self.selected_indices = set(selected_indices or ())
-        self.virtual_size = Size(max(len(frames), 1), 1)
+        self.timeline_width = max(len(frames) * self.FRAME_STRIDE, 1)
+        self.virtual_size = Size(self.timeline_width, 1)
         self.border_title = f"Frame selection - {len(frames):,} analyzed"
         self.border_subtitle = "Arrows scroll | Ctrl+PgUp/PgDn page | Home/End"
 
@@ -102,9 +104,9 @@ class SharpnessChart(ScrollView):
 
     def on_resize(self, _event: Resize) -> None:
         """Keep the virtual canvas as tall as the visible chart."""
-        scrollbar_rows = int(len(self.frames) > self.size.width)
+        scrollbar_rows = int(self.timeline_width > self.size.width)
         self.virtual_size = Size(
-            max(len(self.frames), 1),
+            self.timeline_width,
             max(self.size.height - scrollbar_rows, 1),
         )
 
@@ -116,6 +118,14 @@ class SharpnessChart(ScrollView):
     def action_first_frame(self) -> None:
         """Scroll directly to the beginning of the analyzed timeline."""
         self.scroll_to(x=0, animate=False)
+
+    def action_scroll_left(self) -> None:
+        """Scroll left by one complete frame slot."""
+        self.scroll_relative(x=-self.FRAME_STRIDE, animate=False)
+
+    def action_scroll_right(self) -> None:
+        """Scroll right by one complete frame slot."""
+        self.scroll_relative(x=self.FRAME_STRIDE, animate=False)
 
     def action_last_frame(self) -> None:
         """Scroll directly to the end of the analyzed timeline."""
@@ -129,43 +139,90 @@ class SharpnessChart(ScrollView):
         if width < 1 or y >= viewport_height:
             return Strip([], 0)
 
-        start, stop = self._visible_frame_range(width)
         if y == 0:
+            start, stop = self._visible_frame_range(width)
             return self._render_window_title(width, start, stop, blank_style)
 
         if not self.frames:
             return Strip([Segment(" " * width, blank_style)], width)
 
-        chart_y = y - 1
-        chart_height = max(viewport_height - 1, 1)
+        return self._render_chart_line(
+            width,
+            y - 1,
+            max(viewport_height - 1, 1),
+            blank_style,
+        )
+
+    def _render_chart_line(
+        self,
+        width: int,
+        chart_y: int,
+        chart_height: int,
+        blank_style: Style,
+    ) -> Strip:
+        """Render frame bars and their guaranteed blank separator columns."""
         selected_style = self.get_component_rich_style(
             "sharpness-chart--selected"
         )
         unselected_style = self.get_component_rich_style(
             "sharpness-chart--unselected"
         )
-        segments: list[Segment] = []
-
-        for frame in self.frames[start:stop]:
-            normalized_score = (frame.sharpness_score - self.min_score) / self.score_range
-            bar_height = 1 + int(normalized_score * (chart_height - 1))
-            should_draw = (chart_height - 1 - chart_y) < bar_height
-            style = (
-                selected_style
-                if frame.index in self.selected_indices
-                else unselected_style
+        segments = [
+            self._render_timeline_column(
+                virtual_column,
+                chart_y,
+                chart_height,
+                selected_style,
+                unselected_style,
+                blank_style,
             )
-            segments.append(Segment("█" if should_draw else " ", style))
-
-        padding = width - (stop - start)
-        if padding > 0:
-            segments.append(Segment(" " * padding, blank_style))
+            for virtual_column in range(
+                int(self.scroll_offset.x),
+                int(self.scroll_offset.x) + width,
+            )
+        ]
         return Strip(segments, width)
+
+    def _render_timeline_column(
+        self,
+        virtual_column: int,
+        chart_y: int,
+        chart_height: int,
+        selected_style: Style,
+        unselected_style: Style,
+        blank_style: Style,
+    ) -> Segment:
+        """Render a bar column or the blank gap following it."""
+        frame_position, slot_column = divmod(virtual_column, self.FRAME_STRIDE)
+        if slot_column or frame_position >= len(self.frames):
+            return Segment(" ", blank_style)
+
+        frame = self.frames[frame_position]
+        normalized = (frame.sharpness_score - self.min_score) / self.score_range
+        bar_height = 1 + int(normalized * (chart_height - 1))
+        if (chart_height - 1 - chart_y) >= bar_height:
+            return Segment(" ", blank_style)
+
+        style = (
+            selected_style
+            if frame.index in self.selected_indices
+            else unselected_style
+        )
+        return Segment("█", style)
 
     def _visible_frame_range(self, width: int) -> tuple[int, int]:
         """Return the frame positions represented by the visible viewport."""
-        start = min(int(self.scroll_offset.x), len(self.frames))
-        return start, min(start + width, len(self.frames))
+        scroll_x = min(int(self.scroll_offset.x), self.timeline_width)
+        visible_end = min(scroll_x + width, self.timeline_width)
+        start = min(
+            (scroll_x + self.FRAME_STRIDE - 1) // self.FRAME_STRIDE,
+            len(self.frames),
+        )
+        stop = min(
+            (visible_end + self.FRAME_STRIDE - 1) // self.FRAME_STRIDE,
+            len(self.frames),
+        )
+        return start, stop
 
     def _render_window_title(
         self,
