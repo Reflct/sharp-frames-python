@@ -127,9 +127,16 @@ class SharpFrames:
             if duration:
                 print(f"Video duration: {self._format_duration(duration)}")
 
+            # Extract color space from existing video_info (no extra ffprobe call)
+            from .processing.colorspace import get_color_info_description
+            color_info = self._extract_color_info_from_video_info(video_info)
+            if color_info.needs_conversion:
+                print(f"Detected color space: {get_color_info_description(color_info)}")
+                print("Will convert to sRGB/BT.709")
+
             print(f"Extracting frames at {self.fps} fps...")
             # Extract frames relies on self.temp_dir being set
-            self._extract_frames(duration)
+            self._extract_frames(duration, color_info)
 
             # Get paths from temp directory
             frame_paths = self._get_frame_paths()
@@ -295,17 +302,24 @@ class SharpFrames:
                 
                 # Extract video info and frames for this video
                 print("Extracting video information...")
+                video_info = None
+                color_info = None
                 try:
                     video_info = self._get_video_info()
                     duration = self._extract_duration(video_info)
                     if duration:
                         print(f"Video duration: {self._format_duration(duration)}")
+                    # Extract color space from existing video_info (no extra ffprobe call)
+                    color_info = self._extract_color_info_from_video_info(video_info)
                 except Exception as e:
                     print(f"Warning: Could not extract video info for {os.path.basename(video_path)}: {e}")
                     duration = None
-                
+                    # Fallback to separate color detection if video_info failed
+                    from .processing.colorspace import detect_color_space
+                    color_info = detect_color_space(video_path)
+
                 print(f"Extracting frames at {self.fps} fps...")
-                if self._extract_frames(duration):
+                if self._extract_frames(duration, color_info):
                     # Get frame paths from this video
                     video_frame_paths = self._get_frame_paths()
                     print(f"Extracted {len(video_frame_paths)} frames from {os.path.basename(video_path)}")
@@ -408,48 +422,74 @@ class SharpFrames:
         return None
     
     def _get_video_info(self) -> Dict[str, Any]:
-        """Get video metadata using FFmpeg"""
-        # Try using ffprobe for more detailed info
+        """Get video metadata using FFmpeg including color space info."""
+        # Try using ffprobe for more detailed info including color metadata
         probe_command = [
-            "ffprobe", 
+            "ffprobe",
             "-v", "error",
             "-show_entries", "format=duration",
             "-select_streams", "v:0",
-            "-show_entries", "stream=width,height,avg_frame_rate,duration",
+            "-show_entries", "stream=width,height,avg_frame_rate,duration,color_primaries,color_transfer,color_space",
             "-of", "json",
             self.input_path
         ]
-        
+
         try:
             probe_result = subprocess.run(
-                probe_command, 
-                stdout=subprocess.PIPE, 
-                stderr=subprocess.PIPE, 
+                probe_command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 check=True,
                 text=True
             )
-            
+
             video_info = json.loads(probe_result.stdout)
             return video_info
         except subprocess.CalledProcessError:
             # Fallback if ffprobe fails
             return {"error": "Failed to get video info"}
+
+    def _extract_color_info_from_video_info(self, video_info: Dict[str, Any]):
+        """Extract color space info from existing video_info (avoids extra ffprobe call)."""
+        from .processing.colorspace import parse_color_info_from_stream, VideoColorInfo, ColorPrimaries, TransferFunction, ColorMatrix
+
+        streams = video_info.get('streams', [])
+        if streams:
+            return parse_color_info_from_stream(streams[0])
+
+        # No stream found, return default
+        return VideoColorInfo(
+            color_primaries=ColorPrimaries.UNKNOWN,
+            transfer_function=TransferFunction.UNKNOWN,
+            color_matrix=ColorMatrix.UNKNOWN,
+            is_hdr=False
+        )
     
-    def _extract_frames(self, duration: float = None) -> bool:
-        """Extract frames from video using FFmpeg"""
+    def _extract_frames(self, duration: float = None, color_info=None) -> bool:
+        """Extract frames from video using FFmpeg with color space conversion."""
+        from .processing.colorspace import build_colorspace_filter
+
         output_pattern = os.path.join(self.temp_dir, f"frame_%05d.{self.output_format}")
-        
+
         # Set a timeout threshold for the process in case it hangs
         process_timeout_seconds = 3600 # 1 hour timeout for FFmpeg process
-        
-        # Build the video filters string
+
+        # Build the video filters string - order matters!
         vf_filters = []
+
+        # 1. Color space conversion FIRST (before any other processing)
+        if color_info is not None:
+            colorspace_filter = build_colorspace_filter(color_info)
+            if colorspace_filter:
+                vf_filters.append(colorspace_filter)
+
+        # 2. FPS filter
         vf_filters.append(f"fps={self.fps}")
-        
-        # Add scaling filter if width is specified
+
+        # 3. Scaling filter (after color conversion)
         if self.width > 0:
             vf_filters.append(f"scale={self.width}:-2")  # -2 maintains aspect ratio and ensures even height
-            
+
         # Join all filters with commas
         vf_string = ",".join(vf_filters)
         

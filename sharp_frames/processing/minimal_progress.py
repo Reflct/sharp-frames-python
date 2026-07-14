@@ -79,19 +79,29 @@ class MinimalProgressSharpFrames(SharpFrames):
             
         return True
     
-    def _build_ffmpeg_command(self, output_pattern: str) -> List[str]:
-        """Build the FFmpeg command for frame extraction."""
-        # Build the video filters string
+    def _build_ffmpeg_command(self, output_pattern: str, color_info=None) -> List[str]:
+        """Build the FFmpeg command for frame extraction with color space conversion."""
+        from .colorspace import build_colorspace_filter
+
+        # Build the video filters string - order matters!
         vf_filters = []
+
+        # 1. Color space conversion FIRST (before any other processing)
+        if color_info is not None:
+            colorspace_filter = build_colorspace_filter(color_info)
+            if colorspace_filter:
+                vf_filters.append(colorspace_filter)
+
+        # 2. FPS filter
         vf_filters.append(f"fps={self.fps}")
-        
-        # Add scaling filter if width is specified
+
+        # 3. Scaling filter (after color conversion)
         if self.width > 0:
             vf_filters.append(f"scale={self.width}:-2")  # -2 maintains aspect ratio and ensures even height
-            
+
         # Join all filters with commas
         vf_string = ",".join(vf_filters)
-        
+
         command = [
             "ffmpeg",
             "-i", self.input_path,
@@ -102,7 +112,7 @@ class MinimalProgressSharpFrames(SharpFrames):
             "-loglevel", "warning",  # Show errors and warnings
             output_pattern
         ]
-        
+
         return command
     
     def _estimate_total_frames(self, duration: Optional[float]) -> Optional[int]:
@@ -234,12 +244,12 @@ class MinimalProgressSharpFrames(SharpFrames):
 
         return True
     
-    def _extract_frames(self, duration: float = None) -> bool:
+    def _extract_frames(self, duration: float = None, color_info=None) -> bool:
         """Override to add real-time progress tracking to frame extraction with proper cleanup."""
         output_pattern = os.path.join(self.temp_dir, f"frame_%05d.{self.output_format}")
-        
+
         # Build command and estimate progress
-        command = self._build_ffmpeg_command(output_pattern)
+        command = self._build_ffmpeg_command(output_pattern, color_info)
         estimated_total_frames = self._estimate_total_frames(duration)
         
         # Print the FFmpeg command for debugging

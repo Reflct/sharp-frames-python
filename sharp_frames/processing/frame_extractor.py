@@ -6,11 +6,14 @@ import os
 import tempfile
 import subprocess
 import shutil
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, TYPE_CHECKING
 from pathlib import Path
 
 from ..models.frame_data import FrameData, ExtractionResult
 from ..video_utils import get_video_files_in_directory
+
+if TYPE_CHECKING:
+    from .colorspace import VideoColorInfo
 
 
 class FrameExtractor:
@@ -67,21 +70,30 @@ class FrameExtractor:
     
     def _extract_video_frames(self, config: Dict[str, Any]) -> ExtractionResult:
         """Extract frames from single video file."""
+        from .colorspace import get_color_info_description
+
         video_path = config['input_path']
         fps = config.get('fps', 10)
         output_format = config.get('output_format', 'jpg')
         width = config.get('width', 0)
-        
+
         # Create temporary directory for extraction
         temp_dir = self._create_temp_directory()
-        
+
         try:
-            # Extract video info
+            # Extract video info (includes color space data)
             video_info = self._get_video_info(video_path)
             duration = self._extract_duration_from_info(video_info)
-            
-            # Perform FFmpeg extraction
-            if not self._run_ffmpeg_extraction(video_path, temp_dir, fps, output_format, width, duration):
+
+            # Extract color space from existing video_info (no extra ffprobe call)
+            color_info = self._extract_color_info_from_video_info(video_info)
+            if color_info.needs_conversion:
+                color_desc = get_color_info_description(color_info)
+                if self.progress_callback:
+                    self.progress_callback("extraction", 0, 0, f"Detected {color_desc}, will convert to sRGB")
+
+            # Perform FFmpeg extraction with color space handling
+            if not self._run_ffmpeg_extraction(video_path, temp_dir, fps, output_format, width, duration, color_info):
                 raise RuntimeError("Frame extraction failed")
             
             # Get extracted frame paths
@@ -192,17 +204,20 @@ class FrameExtractor:
         video_name = f"video_{video_index + 1:03d}"
         video_temp_dir = os.path.join(temp_dir, video_name)
         os.makedirs(video_temp_dir, exist_ok=True)
-        
+
         fps = config.get('fps', 10)
         output_format = config.get('output_format', 'jpg')
         width = config.get('width', 0)
-        
-        # Get video info
+
+        # Get video info (includes color space data)
         video_info = self._get_video_info(video_path)
         duration = self._extract_duration_from_info(video_info)
-        
-        # Extract frames
-        if not self._run_ffmpeg_extraction(video_path, video_temp_dir, fps, output_format, width, duration):
+
+        # Extract color space from existing video_info (no extra ffprobe call)
+        color_info = self._extract_color_info_from_video_info(video_info)
+
+        # Extract frames with color space handling
+        if not self._run_ffmpeg_extraction(video_path, video_temp_dir, fps, output_format, width, duration, color_info):
             raise RuntimeError(f"Failed to extract frames from {video_path}")
         
         # Get extracted frame files
@@ -301,18 +316,50 @@ class FrameExtractor:
             return float(duration_str) if duration_str else None
         except (ValueError, TypeError):
             return None
+
+    def _extract_color_info_from_video_info(self, video_info: Dict[str, Any]) -> 'VideoColorInfo':
+        """Extract color space info from existing video_info (avoids extra ffprobe call)."""
+        from .colorspace import parse_color_info_from_stream, VideoColorInfo, ColorPrimaries, TransferFunction, ColorMatrix
+
+        streams = video_info.get('streams', [])
+        # Find the first video stream
+        for stream in streams:
+            if stream.get('codec_type') == 'video':
+                return parse_color_info_from_stream(stream)
+
+        # No video stream found, return default
+        return VideoColorInfo(
+            color_primaries=ColorPrimaries.UNKNOWN,
+            transfer_function=TransferFunction.UNKNOWN,
+            color_matrix=ColorMatrix.UNKNOWN,
+            is_hdr=False
+        )
     
-    def _run_ffmpeg_extraction(self, video_path: str, output_dir: str, fps: int, 
-                              output_format: str, width: int, duration: Optional[float] = None) -> bool:
-        """Run FFmpeg to extract frames from video with progress monitoring."""
+    def _run_ffmpeg_extraction(self, video_path: str, output_dir: str, fps: int,
+                              output_format: str, width: int, duration: Optional[float] = None,
+                              color_info: Optional['VideoColorInfo'] = None) -> bool:
+        """Run FFmpeg to extract frames from video with progress monitoring and color space conversion."""
+        from .colorspace import build_colorspace_filter
+
         output_pattern = os.path.join(output_dir, f"frame_%05d.{output_format}")
-        
-        # Build video filters
-        vf_filters = [f"fps={fps}"]
+
+        # Build video filters - order matters!
+        vf_filters = []
+
+        # 1. Color space conversion FIRST (before any scaling)
+        if color_info is not None:
+            colorspace_filter = build_colorspace_filter(color_info)
+            if colorspace_filter:
+                vf_filters.append(colorspace_filter)
+
+        # 2. FPS filter
+        vf_filters.append(f"fps={fps}")
+
+        # 3. Scale filter (after color conversion)
         if width > 0:
             # Use lanczos scaling for high-quality downsampling
             vf_filters.append(f"scale={width}:-1:flags=lanczos")
-        
+
         vf_string = ",".join(vf_filters)
         
         # Use proper executable name based on platform
