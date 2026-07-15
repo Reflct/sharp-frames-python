@@ -4,7 +4,7 @@ from unittest.mock import Mock, PropertyMock, patch
 
 import pytest
 from textual.app import App
-from textual.widgets import Button, Select, Static
+from textual.widgets import Button, Checkbox, Select, Static
 
 from sharp_frames.models.frame_data import ExtractionResult, FrameData
 from sharp_frames.ui.app import SharpFramesApp
@@ -55,9 +55,143 @@ async def test_configuration_screen_mounts_current_wizard_controls():
         await pilot.pause(0.2)
 
         assert str(form.query_one("#step-info", Static).render())
-        assert form.query_one("#next-btn", Button).label == "Next"
+        assert str(form.query_one("#next-btn", Button).label) == "Next"
         assert form.query_one("#back-btn", Button).disabled is True
         assert form.get_current_step_name() == "input_type"
+
+
+@pytest.mark.asyncio
+async def test_enter_advances_without_toggling_focused_checkbox():
+    form = ConfigurationForm()
+    form.config_data = {"input_type": "video"}
+
+    async with ScreenHarness(form).run_test() as pilot:
+        form.current_step = form.steps.index("force_overwrite")
+        form.show_current_step()
+        await pilot.pause(0.2)
+
+        checkbox = form.query_one("#force-overwrite", Checkbox)
+        checkbox.focus()
+        assert checkbox.value is False
+
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert form.get_current_step_name() == "confirm"
+        assert form.config_data["force_overwrite"] is False
+
+
+@pytest.mark.asyncio
+async def test_space_toggles_focused_checkbox_without_advancing():
+    form = ConfigurationForm()
+    form.config_data = {"input_type": "video"}
+
+    async with ScreenHarness(form).run_test() as pilot:
+        form.current_step = form.steps.index("force_overwrite")
+        form.show_current_step()
+        await pilot.pause(0.2)
+
+        checkbox = form.query_one("#force-overwrite", Checkbox)
+        checkbox.focus()
+        await pilot.press("space")
+        await pilot.pause()
+
+        assert checkbox.value is True
+        assert form.get_current_step_name() == "force_overwrite"
+
+
+@pytest.mark.asyncio
+async def test_space_selects_highlighted_dropdown_option():
+    form = ConfigurationForm()
+    form.config_data = {"input_type": "video"}
+
+    async with ScreenHarness(form).run_test() as pilot:
+        form.current_step = form.steps.index("output_format")
+        form.show_current_step()
+        await pilot.pause(0.2)
+
+        select = form.query_one("#format-select", Select)
+        select.focus()
+        await pilot.press("space", "down", "space")
+        await pilot.pause()
+
+        assert select.value == "png"
+        assert select.expanded is False
+        assert form.get_current_step_name() == "output_format"
+
+
+@pytest.mark.asyncio
+async def test_enter_advances_input_step_exactly_once():
+    form = ConfigurationForm()
+    form.config_data = {"input_type": "video"}
+    handler = form.step_handlers["input_path"]
+
+    with (
+        patch.object(handler, "validate", return_value=True),
+        patch.object(
+            handler,
+            "get_data",
+            return_value={"input_path": "/tmp/video.mp4"},
+        ),
+    ):
+        async with ScreenHarness(form).run_test() as pilot:
+            form.current_step = form.steps.index("input_path")
+            form.show_current_step()
+            await pilot.pause(0.2)
+
+            form.query_one("#input-path").focus()
+            await pilot.press("enter")
+            await pilot.pause()
+
+            assert form.get_current_step_name() == "output_dir"
+
+
+@pytest.mark.asyncio
+async def test_selection_enter_confirms_with_method_menu_focused():
+    processor = Mock()
+    processor.preview_selection.return_value = 4
+    processor.selector.select_frames.return_value = _extraction_result().frames[:4]
+    screen = SelectionScreen(
+        processor,
+        _extraction_result(),
+        {"input_type": "video", "output_dir": "/output"},
+    )
+
+    with patch.object(screen, "_start_final_processing") as process:
+        async with ScreenHarness(screen).run_test() as pilot:
+            await pilot.pause(0.2)
+            method_select = screen.query_one("#method_select", Select)
+            method_select.focus()
+
+            await pilot.press("enter")
+            await pilot.pause()
+
+            process.assert_called_once_with()
+            assert method_select.expanded is False
+
+
+@pytest.mark.asyncio
+async def test_selection_space_chooses_highlighted_method():
+    processor = Mock()
+    processor.preview_selection.return_value = 4
+    processor.selector.select_frames.return_value = _extraction_result().frames[:4]
+    screen = SelectionScreen(
+        processor,
+        _extraction_result(),
+        {"input_type": "video", "output_dir": "/output"},
+    )
+
+    async with ScreenHarness(screen).run_test() as pilot:
+        await pilot.pause(0.2)
+        method_select = screen.query_one("#method_select", Select)
+        method_select.focus()
+
+        await pilot.press("space", "up", "space")
+        await pilot.pause(0.2)
+
+        assert method_select.value == "best_n"
+        assert method_select.expanded is False
+        assert screen.current_method == "best_n"
 
 
 @pytest.mark.asyncio

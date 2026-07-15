@@ -15,6 +15,8 @@ import concurrent.futures # Add concurrent.futures import
 # Add tqdm for progress visualization (mandatory dependency)
 from tqdm import tqdm
 
+from .focus_scoring import calculate_focus_score
+
 # Import selection strategy functions
 from .selection_methods import (
     select_best_n_frames,
@@ -23,7 +25,11 @@ from .selection_methods import (
 )
 
 # Import video directory utilities
-from .video_utils import SUPPORTED_IMAGE_EXTENSIONS, get_video_files_in_directory
+from .video_utils import (
+    SUPPORTED_IMAGE_EXTENSIONS,
+    get_video_files_in_directory,
+    natural_path_key,
+)
 
 # Define a custom exception for image processing errors
 class ImageProcessingError(Exception):
@@ -705,8 +711,7 @@ class SharpFrames:
             print(f"Error scanning directory {self.input_path}: {str(e)}")
             raise
 
-        # Sort paths alphabetically for consistent ordering
-        image_paths.sort()
+        image_paths.sort(key=natural_path_key)
 
         if not image_paths:
             print(f"Warning: No supported image files ({supported_extensions_str}) found in {self.input_path}.")
@@ -802,14 +807,7 @@ class SharpFrames:
                 # Raise custom exception if image reading fails
                 raise ImageProcessingError(f"Failed to read image: {path}")
 
-            height, width = img_gray.shape
-            # Use INTER_AREA for downscaling - generally preferred
-            img_half = cv2.resize(img_gray, (width // 2, height // 2), interpolation=cv2.INTER_AREA)
-
-            # Calculate Laplacian variance
-            score = float(cv2.Laplacian(img_half, cv2.CV_64F).var())
-
-            return score
+            return calculate_focus_score(img_gray)
         except cv2.error as e:
             # Wrap OpenCV errors
             raise ImageProcessingError(f"OpenCV error processing {path}: {str(e)}") from e

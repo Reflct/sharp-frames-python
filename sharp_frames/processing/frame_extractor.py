@@ -18,6 +18,7 @@ from ..video_utils import (
     SUPPORTED_IMAGE_EXTENSIONS,
     get_ffmpeg_installation_hint,
     get_video_files_in_directory,
+    natural_path_key,
 )
 
 if TYPE_CHECKING:
@@ -308,8 +309,7 @@ class FrameExtractor:
         except OSError as e:
             raise FileNotFoundError(f"Could not scan directory {directory}: {e}")
         
-        # Sort for consistent ordering
-        image_files.sort()
+        image_files.sort(key=natural_path_key)
         return image_files
     
     def _get_image_output_name(self, image_path: str) -> str:
@@ -622,8 +622,7 @@ class FrameExtractor:
         except OSError:
             return []
         
-        # Sort by filename to maintain frame order
-        frame_files.sort()
+        frame_files.sort(key=natural_path_key)
         return frame_files
     
     def _get_supported_image_extensions(self) -> set:

@@ -26,6 +26,7 @@ from rich.style import Style
 
 from ...models.frame_data import ExtractionResult, FrameData
 from ...processing.tui_processor import TUIProcessor
+from ..keyboard import OptionSelect, select_focused_option
 
 
 class SharpnessChart(ScrollView):
@@ -72,15 +73,18 @@ class SharpnessChart(ScrollView):
 
     SharpnessChart .sharpness-chart--selected {
         color: $primary-lighten-2;
+        background: $background;
         text-style: bold;
     }
 
     SharpnessChart .sharpness-chart--unselected {
         color: $text-muted;
+        background: $background;
     }
 
     SharpnessChart .sharpness-chart--title {
         color: $primary;
+        background: $background;
         text-style: bold;
     }
     """
@@ -96,7 +100,7 @@ class SharpnessChart(ScrollView):
         self.selected_indices = set(selected_indices or ())
         self.timeline_width = max(len(frames) * self.FRAME_STRIDE, 1)
         self.virtual_size = Size(self.timeline_width, 1)
-        self.border_title = f"Frame selection - {len(frames):,} analyzed"
+        self.border_title = "Frame selection"
         self.border_subtitle = "Arrows scroll | Ctrl+PgUp/PgDn page | Home/End"
 
         if self.frames:
@@ -273,31 +277,53 @@ class InputWithControls(Widget):
         width: 20;
         margin: 0 1 0 0;
         height: 3;
+        border: solid #9f9f9f;
+    }
+
+    InputWithControls Input.-valid {
+        border: solid #9f9f9f;
+    }
+
+    InputWithControls Input:focus,
+    InputWithControls Input.-valid:focus {
+        border: solid $primary;
     }
     
-    InputWithControls .increment-controls {
-        width: 8;
+    InputWithControls .stepper-controls {
+        width: 14;
         layout: horizontal;
         height: 3;
     }
     
-    InputWithControls .increment-btn,
-    InputWithControls .decrement-btn {
+    InputWithControls .stepper-button {
         height: 3;
-        width: 3;
+        width: 7;
         margin: 0;
         padding: 0;
-        min-width: 3;
+        min-width: 7;
         min-height: 3;
         max-height: 3;
-        max-width: 3;
+        max-width: 7;
         content-align: center middle;
         text-align: center;
+        color: $text-muted;
+        background: $surface;
+        border: tall $surface-lighten-1;
+        text-style: bold;
     }
-    
-    InputWithControls .decrement-btn {
-        margin-right: 2;
+
+    InputWithControls .stepper-button:hover {
+        color: $text;
+        background: $surface-lighten-1;
+        border: tall $surface-lighten-2;
     }
+
+    InputWithControls .stepper-button:focus {
+        color: $text;
+        background: $surface;
+        border: tall $primary;
+    }
+
     """
     
     def __init__(self, value: str = "", input_id: str = "", min_value: int = 0, max_value: int = 10000, step: int = 1, **kwargs):
@@ -311,9 +337,19 @@ class InputWithControls(Widget):
     def compose(self) -> ComposeResult:
         """Compose the input with increment/decrement buttons."""
         yield Input(value=self._value, id=self.input_id)
-        with Container(classes="increment-controls"):
-            yield Button(label="-", classes="decrement-btn", id=f"{self.input_id}_dec", variant="primary")
-            yield Button(label="+", classes="increment-btn", id=f"{self.input_id}_inc", variant="primary")
+        with Container(classes="stepper-controls"):
+            yield Button(
+                label="−",
+                classes="stepper-button decrement-btn",
+                id=f"{self.input_id}_dec",
+                variant="default",
+            )
+            yield Button(
+                label="+",
+                classes="stepper-button increment-btn",
+                id=f"{self.input_id}_inc",
+                variant="default",
+            )
     
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle increment/decrement button presses."""
@@ -377,7 +413,20 @@ class SelectionScreen(Screen):
     BINDINGS = [
         Binding("ctrl+c", "cancel", "Cancel"),
         Binding("escape", "cancel", "Cancel"),
-        Binding("enter", "confirm", "Confirm Selection", key_display="Enter"),
+        Binding(
+            "enter",
+            "confirm",
+            "Confirm Selection",
+            key_display="Enter",
+            priority=True,
+        ),
+        Binding(
+            "space",
+            "select_current_option",
+            "Select",
+            show=False,
+            priority=True,
+        ),
         Binding("f1", "help", "Help", show=True),
     ]
     
@@ -454,7 +503,9 @@ class SelectionScreen(Screen):
             # Title section - single line with left and right text
             with Horizontal(id="title_section", classes="title_section"):
                 yield Static("Select Frames", classes="title_left")
-                yield Static(f"Choose from {total_frames:,} analyzed frames", classes="title_right")
+                yield Static(
+                    self._frame_count_summary(), classes="title_right"
+                )
             
             # Sharpness chart - one horizontally scrollable column per frame
             yield SharpnessChart(
@@ -468,7 +519,7 @@ class SelectionScreen(Screen):
                 # Method selection on the left
                 with Container(id="method_container", classes="control_group"):
                     yield Label("Selection Method", classes="control_label")
-                    yield Select(
+                    yield OptionSelect(
                         options=[(info["name"], key) for key, info in self.method_definitions.items()],
                         value="batched",
                         id="method_select"
@@ -506,6 +557,16 @@ class SelectionScreen(Screen):
                 yield Button(f"Save {initial_count:,} Images", id="confirm_button", variant="primary")
         
         yield Footer()
+
+    def _frame_count_summary(self) -> str:
+        """Summarize analyzed and excluded inputs for the title row."""
+        analyzed_count = len(self.extraction_result.frames)
+        summary = f"Choose from {analyzed_count:,} analyzed frames"
+        analysis = self.extraction_result.metadata.get("sharpness_analysis", {})
+        unreadable_count = int(analysis.get("unreadable_count", 0) or 0)
+        if unreadable_count:
+            summary += f" | {unreadable_count:,} unreadable excluded"
+        return summary
     
     def on_mount(self) -> None:
         """Initialize the screen when mounted."""
@@ -611,6 +672,10 @@ class SelectionScreen(Screen):
     def action_confirm(self) -> None:
         """Confirm selection and proceed with saving."""
         self._start_final_processing()
+
+    def action_select_current_option(self) -> None:
+        """Use Space to select the option under the current focus."""
+        select_focused_option(self.app.focused)
     
     def action_start_over(self) -> None:
         """Reset everything and return to the first step of configuration."""

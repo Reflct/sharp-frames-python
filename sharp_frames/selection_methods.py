@@ -1,6 +1,7 @@
 """Canonical frame-selection algorithms shared by the CLI and TUI."""
 
 from collections import OrderedDict
+from statistics import median
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from tqdm import tqdm
@@ -191,16 +192,14 @@ def _outlier_positions(
         return set()
 
     scores = [float(frame.get("sharpnessScore", 0) or 0) for _, frame in group]
-    score_range = max(scores) - min(scores)
-    if score_range == 0:
-        return set()
 
     actual_window_size = max(1, window_size)
     if actual_window_size % 2 == 0:
         actual_window_size += 1
     half_window = actual_window_size // 2
-    divisor = threshold_divisor if threshold_divisor > 0 else 4.0
-    threshold = (100 - min(100, sensitivity)) / divisor
+    maximum_threshold = threshold_divisor if threshold_divisor > 0 else 4.0
+    sensitivity_ratio = min(100, sensitivity) / 100
+    robust_threshold = 0.5 + ((maximum_threshold - 0.5) * (1 - sensitivity_ratio))
     outliers: Set[int] = set()
 
     for position, current_score in enumerate(scores):
@@ -209,9 +208,18 @@ def _outlier_positions(
         neighbor_scores = scores[window_start:position] + scores[position + 1 : window_end]
         if not neighbor_scores or len(neighbor_scores) < max(0, min_neighbors):
             continue
-        neighbor_average = sum(neighbor_scores) / len(neighbor_scores)
-        deficit_percent = ((neighbor_average - current_score) / score_range) * 100
-        if current_score < neighbor_average and deficit_percent > threshold:
+        neighbor_median = median(neighbor_scores)
+        absolute_deviations = [
+            abs(score - neighbor_median) for score in neighbor_scores
+        ]
+        median_absolute_deviation = median(absolute_deviations)
+        robust_scale = median_absolute_deviation * 1.4826
+        if robust_scale == 0:
+            robust_scale = max(abs(neighbor_median) * 0.05, 1e-9)
+
+        deficit = neighbor_median - current_score
+        robust_deficit = deficit / robust_scale
+        if deficit > 0 and robust_deficit > robust_threshold:
             outliers.add(position)
     return outliers
 

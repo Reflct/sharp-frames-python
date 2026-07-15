@@ -5,6 +5,27 @@ All notable changes to the Sharp Frames project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-07-16
+
+### Added
+- Scrollable frame timeline with keyboard navigation and full-result visualization
+- Resolution-normalized focus scoring for more consistent comparisons across source sizes
+- Cross-platform CI coverage for Python 3.10 through 3.13 on Linux, macOS, and Windows
+- Regression coverage for selection quality, output collisions, cancellation, and runtime cleanup
+
+### Changed
+- Selection methods now balance sharpness and temporal distribution more consistently
+- Frame extraction, analysis, preview, and saving pipelines provide stricter validation and failure reporting
+- Image-directory exports preserve content while correctly handling format conversion and case-insensitive filename collisions
+- Configuration and selection screens provide clearer controls, status, and keyboard behavior
+
+### Fixed
+- FFmpeg and FFprobe process cleanup, cancellation, timeout, and pipe handling
+- Partial or failed image reads being treated as valid zero-quality frames
+- Selection previews disagreeing with the frames produced during processing
+- Output metadata reporting frames that were not successfully saved
+- Platform-specific dependency guidance and Windows-safe process startup
+
 ## [0.3.1] - 2025-01-29
 
 ### Fixed
@@ -136,4 +157,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - outlier-removal: Remove outliers based on comparison with neighbors
 - Interactive mode with guided prompts
 - Proper Python package structure for pip and pipx installation
-- Command-line interface with `sharp-frames` command 
+- Command-line interface with `sharp-frames` command

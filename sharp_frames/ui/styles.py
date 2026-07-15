@@ -425,7 +425,7 @@ SharpnessChart {
     width: 100%;
     border: solid $primary;
     margin: 1 0;
-    background: $surface-lighten-1;
+    background: $background;
 }
 
 /* Controls section takes remaining space */
@@ -492,30 +492,51 @@ InputWithControls Input {
     width: 20;
     margin: 0 1 0 0;
     height: 3;
+    border: solid #9f9f9f;
 }
 
-InputWithControls .increment-controls {
-    width: 8;
+InputWithControls Input.-valid {
+    border: solid #9f9f9f;
+}
+
+InputWithControls Input:focus,
+InputWithControls Input.-valid:focus {
+    border: solid $primary;
+}
+
+InputWithControls .stepper-controls {
+    width: 14;
     layout: horizontal;
     height: 3;
 }
 
-InputWithControls .increment-btn,
-InputWithControls .decrement-btn {
+InputWithControls .stepper-button {
     height: 3 !important;
-    width: 3 !important;
+    width: 7 !important;
     margin: 0 !important;
     padding: 0 !important;
-    min-width: 3 !important;
+    min-width: 7 !important;
     min-height: 3 !important;
     max-height: 3 !important;
-    max-width: 3 !important;
+    max-width: 7 !important;
     content-align: center middle;
     text-align: center;
+    color: $text-muted;
+    background: $surface;
+    border: tall $surface-lighten-1;
+    text-style: bold;
 }
 
-InputWithControls .decrement-btn {
-    margin-right: 2 !important;
+InputWithControls .stepper-button:hover {
+    color: $text;
+    background: $surface-lighten-1;
+    border: tall $surface-lighten-2;
+}
+
+InputWithControls .stepper-button:focus {
+    color: $text;
+    background: $surface;
+    border: tall $primary;
 }
 
 /* Action buttons inside main content */
@@ -572,4 +593,4 @@ InputWithControls .decrement-btn {
     color: $primary;
     text-style: bold;
 }
-""" 
+"""

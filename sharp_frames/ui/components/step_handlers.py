@@ -9,6 +9,7 @@ from textual.containers import Container, Horizontal, Vertical
 from textual.widgets import Label, Input, Select, RadioSet, RadioButton, Checkbox, Static
 
 from ..constants import UIElementIds, InputTypes
+from ..keyboard import OptionSelect
 from .validators import (
     IntRangeValidator, 
     VideoFileValidator, 
@@ -350,7 +351,14 @@ class OutputFormatStepHandler(StepHandler):
         ]
         
         options = [(desc, fmt) for fmt, desc in formats]
-        container.mount(Select(options, value="jpg", id="format-select", classes="field-select"))
+        container.mount(
+            OptionSelect(
+                options,
+                value="jpg",
+                id="format-select",
+                classes="field-select",
+            )
+        )
     
     def validate(self, screen) -> bool:
         """Validate output format."""

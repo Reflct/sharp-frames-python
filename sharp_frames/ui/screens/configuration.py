@@ -3,22 +3,19 @@ Configuration screen for Sharp Frames UI.
 Removes selection method configuration (moved to post-extraction SelectionScreen).
 """
 
-import os
-from typing import Dict, Any
-
 from textual.app import ComposeResult
 from textual.containers import Container, Horizontal
 from textual.widgets import (
-    Header, Footer, Button, Input, Select, RadioSet, RadioButton,
+    Header, Footer, Button, Input, Select, RadioSet,
     Checkbox, Label, Static
 )
 from textual.screen import Screen
 from textual.binding import Binding
-from textual.events import Key
 
 from ..utils import sanitize_path_input
+from ..keyboard import select_focused_option
 
-from ..constants import UIElementIds, InputTypes
+from ..constants import UIElementIds
 from ..components.step_handlers import (
     InputTypeStepHandler,
     InputPathStepHandler,
@@ -39,7 +36,16 @@ class ConfigurationForm(Screen):
         Binding("escape", "cancel", "Cancel"),
         Binding("ctrl+c", "cancel", "Cancel"),
         Binding("f1", "help", "Help", show=True),
-        Binding("enter", "next_step", "Next", show=False),
+        Binding(
+            "enter", "next_step", "Next", show=False, priority=True
+        ),
+        Binding(
+            "space",
+            "select_current_option",
+            "Select",
+            show=False,
+            priority=True,
+        ),
     ]
     
     def __init__(self):
@@ -124,10 +130,6 @@ class ConfigurationForm(Screen):
         elif event.button.id == UIElementIds.CANCEL_BTN:
             self.action_cancel()
     
-    def on_input_submitted(self, event: Input.Submitted) -> None:
-        """Handle Enter key in Input fields - progress to next step."""
-        self._next_step()
-    
     def on_radio_set_changed(self, event) -> None:
         """Handle RadioSet selection change - allow Enter to progress."""
         # Don't auto-progress on selection change, just allow Enter to work
@@ -192,9 +194,9 @@ class ConfigurationForm(Screen):
     def _focus_step_widget(self) -> None:
         """Set focus to the main widget for the current step."""
         step = self.steps[self.current_step]
-        step_container = self.query_one("#step-container")
-        
+
         try:
+            step_container = self.query_one("#step-container")
             # Focus based on step type
             if step == "input_type":
                 # Focus the RadioSet
@@ -300,21 +302,12 @@ class ConfigurationForm(Screen):
             print(f"Failed to show error message: {e}")
     
     def action_next_step(self) -> None:
-        """Move to next step when Enter is pressed."""
-        # Don't progress if an Input widget has focus - let it handle Enter
-        focused = self.app.focused
-        if focused and focused.__class__.__name__ == "Input":
-            return  # Let the Input widget handle Enter
-        
-        # For RadioSet and RadioButton, Enter selects the option but we also want to progress
-        # Check if we're on a step with RadioSet/RadioButton
-        if focused and focused.__class__.__name__ in ["RadioSet", "RadioButton"]:
-            # Still progress to next step
-            self._next_step()
-            return
-        
-        # Otherwise, progress to next step
+        """Move to the next step regardless of the focused control."""
         self._next_step()
+
+    def action_select_current_option(self) -> None:
+        """Use Space to select the option under the current focus."""
+        select_focused_option(self.app.focused)
     
     def action_cancel(self) -> None:
         """Cancel the configuration and exit - same as legacy."""
@@ -369,5 +362,3 @@ Press F1 on any screen for context-specific help.
     def get_current_step_name(self) -> str:
         """Get the name of the current step."""
         return self.steps[self.current_step]
-
-

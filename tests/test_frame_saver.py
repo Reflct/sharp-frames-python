@@ -32,7 +32,7 @@ def test_noninteractive_conflict_aborts_without_mutating_output(tmp_path, capsys
     source = tmp_path / "source.jpg"
     output_dir = tmp_path / "output"
     output_dir.mkdir()
-    existing = output_dir / "source.jpg"
+    existing = output_dir / "SOURCE.JPG"
     _write_image(source, (0, 255, 0))
     existing.write_bytes(b"original output")
 
@@ -43,8 +43,45 @@ def test_noninteractive_conflict_aborts_without_mutating_output(tmp_path, capsys
 
     assert result is False
     assert existing.read_bytes() == b"original output"
-    assert sorted(path.name for path in output_dir.iterdir()) == ["source.jpg"]
+    assert sorted(path.name for path in output_dir.iterdir()) == ["SOURCE.JPG"]
     assert str(existing) in capsys.readouterr().out
+
+
+def test_unrelated_output_files_do_not_block_save(tmp_path):
+    source = tmp_path / "source.jpg"
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    finder_metadata = output_dir / ".DS_Store"
+    _write_image(source, (0, 255, 0))
+    finder_metadata.write_bytes(b"finder metadata")
+
+    result = FrameSaver(show_progress=False).save_frames(
+        [FrameData(str(source), 0, 10.0, output_name="source")],
+        _config(output_dir),
+    )
+
+    assert result is True
+    assert finder_metadata.read_bytes() == b"finder metadata"
+    assert (output_dir / "source.jpg").is_file()
+    assert (output_dir / "selected_metadata.json").is_file()
+
+
+def test_existing_metadata_blocks_save_without_force_overwrite(tmp_path):
+    source = tmp_path / "source.jpg"
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    metadata = output_dir / "selected_metadata.json"
+    _write_image(source, (0, 255, 0))
+    metadata.write_bytes(b"original metadata")
+
+    result = FrameSaver(show_progress=False).save_frames(
+        [FrameData(str(source), 0, 10.0, output_name="source")],
+        _config(output_dir),
+    )
+
+    assert result is False
+    assert metadata.read_bytes() == b"original metadata"
+    assert not (output_dir / "source.jpg").exists()
 
 
 def test_directory_image_is_transcoded_to_requested_format(tmp_path):

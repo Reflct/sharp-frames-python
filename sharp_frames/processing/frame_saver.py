@@ -22,6 +22,8 @@ class ImageProcessingError(Exception):
 
 class FrameSaver:
     """Handles saving selected frames to disk with proper naming conventions."""
+
+    METADATA_FILENAME = "selected_metadata.json"
     
     def __init__(self, show_progress: bool = True):
         """Initialize FrameSaver.
@@ -79,13 +81,16 @@ class FrameSaver:
             print(f"Error creating output directory: {e}")
             return False
         
-        # Check for overwrite if needed
-        if not force_overwrite and not self._check_output_directory_overwrite(output_dir):
-            return False
-
         output_filenames = self._plan_output_filenames(
             selected_frames, input_type, output_format
         )
+
+        # Check only paths this run intends to create. Unrelated files (for
+        # example Finder's .DS_Store) are not overwrite risks.
+        if not force_overwrite and not self._check_output_directory_overwrite(
+            output_dir, output_filenames
+        ):
+            return False
         
         success_count = 0
         metadata_list = []
@@ -294,7 +299,7 @@ class FrameSaver:
             config: Configuration dictionary
             selected_frames: List of selected frames
         """
-        metadata_path = os.path.join(output_dir, "selected_metadata.json")
+        metadata_path = os.path.join(output_dir, self.METADATA_FILENAME)
         
         try:
             # Create comprehensive metadata
@@ -388,33 +393,45 @@ class FrameSaver:
         import datetime
         return datetime.datetime.now().isoformat()
     
-    def _check_output_directory_overwrite(self, output_dir: str) -> bool:
-        """Return whether saving may proceed without unapproved overwrites."""
+    def _check_output_directory_overwrite(
+        self, output_dir: str, output_filenames: List[str]
+    ) -> bool:
+        """Return whether planned outputs can be written without overwriting."""
         if not os.path.exists(output_dir):
             return True
         
         try:
-            existing_files = [f for f in os.listdir(output_dir) 
-                            if os.path.isfile(os.path.join(output_dir, f))]
+            planned_names = {
+                filename.casefold()
+                for filename in [*output_filenames, self.METADATA_FILENAME]
+            }
+            conflicting_entries = [
+                name
+                for name in os.listdir(output_dir)
+                if name.casefold() in planned_names
+            ]
             
-            if existing_files:
+            if conflicting_entries:
                 # In non-interactive mode (TUI/thread context), just warn without prompting
                 if not self.show_progress:  # show_progress=False indicates non-interactive context
                     conflicting_paths = [
                         os.path.join(output_dir, filename)
-                        for filename in sorted(existing_files)
+                        for filename in sorted(conflicting_entries)
                     ]
                     print(
-                        f"Error: Output directory '{output_dir}' contains "
-                        f"{len(existing_files)} file(s). No files were written. "
-                        "Choose an empty directory or enable force overwrite."
+                        f"Error: {len(conflicting_entries)} planned output path(s) "
+                        f"already exist in '{output_dir}'. No files were written. "
+                        "Choose another directory or enable force overwrite."
                     )
                     print("Conflicting files: " + ", ".join(conflicting_paths))
                     return False
                 
                 # Interactive mode - prompt user
-                print(f"Warning: Output directory '{output_dir}' contains {len(existing_files)} files.")
-                print("Existing files may be overwritten.")
+                print(
+                    f"Warning: {len(conflicting_entries)} planned output path(s) "
+                    f"already exist in '{output_dir}'."
+                )
+                print("Those existing outputs may be overwritten.")
                 
                 while True:
                     response = input("Continue anyway? (y/n): ").strip().lower()

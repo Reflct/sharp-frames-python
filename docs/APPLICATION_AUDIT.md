@@ -205,6 +205,22 @@ and CI across supported Python and operating-system versions.
 The following quality improvements are important but are deferred until the
 Critical and High correctness and safety defects above are closed.
 
+### Implementation status (2026-07-15)
+
+| Finding | Current status |
+| --- | --- |
+| Q1 | Baseline implemented. Modern and direct-CLI analysis now normalize the long edge to 512 pixels before scoring. The synthetic cross-resolution ratio fell from 4.0 to approximately 1.39, guarded by a `< 1.5` regression threshold. A fine-detail probe improved sharp/mild-blur separation from approximately 1.17× at 256 pixels to 1.56× at 512 pixels. |
+| Q2 | Baseline implemented. A 5×5 Gaussian denoise pass now feeds an equal-weight, log-normalized Laplacian/Tenengrad score. In the deterministic noise probe, the clean edge scores about 4× above the noisy blurred image. Real labeled-corpus validation remains under Q6. |
+| Q3 | Natural, case-insensitive numbered ordering is implemented for image directories, video directories, extracted frame discovery, and the direct CLI. Optional EXIF chronology remains a future enhancement. |
+| Q4 | Local outlier comparison now uses the neighbor median and median absolute deviation with a stable zero-MAD fallback. A single extreme high score no longer masks a real blurry frame. Scene-aware windows remain future work. |
+| Q5 | Resolved for the modern pipeline. Failed reads are excluded instead of receiving score zero; all-failed inputs stop safely; structured counts and paths are added to metadata; and the Textual selection screen reports exclusions. |
+| Q6 | In progress. Deterministic probes now track resolution invariance, noise resistance, chronology, unreadable exclusion, and synthetic outlier precision/recall. A representative real-media corpus, duplicate metric, and cross-camera baseline remain outstanding. |
+| Q7 | In progress. The chart now scrolls horizontally across the full timeline with guaranteed bar separation. Source-boundary markers and per-frame selection explanations remain outstanding. |
+
+The focus-score metadata records
+`normalized_laplacian_tenengrad_v1` and the 512-pixel analysis scale so future
+quality comparisons can distinguish algorithm versions.
+
 ### Q1. Normalize analysis resolution
 
 Laplacian variance is strongly resolution-dependent. The same synthetic edge

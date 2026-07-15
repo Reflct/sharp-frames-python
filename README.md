@@ -136,8 +136,11 @@ sharp-frames photos selected --selection-method outlier-removal --outlier-sensit
 
 1. **Validation**: Checks input paths, file formats, and system dependencies
 2.  **Extraction**: Videos are extracted to frames at specified FPS using FFmpeg
-3.  **Analysis**: Calculates sharpness scores using Laplacian variance in parallel
-4.  **Selection**: Applies chosen algorithm to select the best frames/images
+3.  **Analysis**: Normalizes analysis resolution, lightly denoises each image,
+    and combines Laplacian variance with Tenengrad focus scoring in parallel.
+    Unreadable inputs are excluded and reported.
+4.  **Selection**: Applies the chosen source-aware algorithm to select the best
+    naturally ordered frames/images.
 5.  **Output**: Saves selected content with metadata including scores and parameters
 
 ## Output

@@ -87,7 +87,15 @@ class TestSharpnessAnalyzer:
                 assert frame.sharpness_score == expected_scores[i]
                 
             # Verify metadata and other properties preserved
-            assert result.metadata == extraction_result.metadata
+            assert result.metadata["fps"] == extraction_result.metadata["fps"]
+            assert result.metadata["sharpness_analysis"] == {
+                "method": "normalized_laplacian_tenengrad_v1",
+                "analysis_long_edge": 512,
+                "input_count": 5,
+                "analyzed_count": 5,
+                "unreadable_count": 0,
+                "unreadable_paths": [],
+            }
             assert result.input_type == extraction_result.input_type
             assert result.temp_dir == extraction_result.temp_dir
     
@@ -112,6 +120,50 @@ class TestSharpnessAnalyzer:
                 assert frame.source_index is not None
                 assert frame.output_name.startswith('video')
                 assert frame.sharpness_score == expected_scores[i]
+
+    def test_calculate_sharpness_excludes_unreadable_frames(self):
+        frames = [
+            FrameData(f"/tmp/frame_{index}.png", index, 0.0)
+            for index in range(3)
+        ]
+        extraction_result = ExtractionResult(
+            frames=frames,
+            metadata={"source_type": "directory"},
+            input_type="directory",
+        )
+
+        with patch.object(
+            self.analyzer,
+            "_calculate_sharpness_parallel",
+            return_value=[100.0, None, 50.0],
+        ):
+            result = self.analyzer.calculate_sharpness(extraction_result)
+
+        assert [frame.index for frame in result.frames] == [0, 2]
+        assert result.metadata["sharpness_analysis"] == {
+            "method": "normalized_laplacian_tenengrad_v1",
+            "analysis_long_edge": 512,
+            "input_count": 3,
+            "analyzed_count": 2,
+            "unreadable_count": 1,
+            "unreadable_paths": ["/tmp/frame_1.png"],
+        }
+        assert "sharpness_analysis" not in extraction_result.metadata
+
+    def test_calculate_sharpness_rejects_an_entirely_unreadable_input(self):
+        extraction_result = ExtractionResult(
+            frames=[FrameData("/tmp/broken.png", 0, 0.0)],
+            metadata={},
+            input_type="directory",
+        )
+
+        with patch.object(
+            self.analyzer,
+            "_calculate_sharpness_parallel",
+            return_value=[None],
+        ):
+            with pytest.raises(ImageProcessingError, match="No readable images"):
+                self.analyzer.calculate_sharpness(extraction_result)
     
     def test_calculate_single_frame_sharpness_actual_calculation(self, test_images_directory):
         """Test actual sharpness calculation using OpenCV Laplacian."""
@@ -170,9 +222,9 @@ class TestSharpnessAnalyzer:
         assert len(scores) == 5
         # First 3 should be valid scores
         assert all(isinstance(score, float) and score >= 0.0 for score in scores[:3])
-        # Last 2 should be 0.0 (error fallback)
-        assert scores[3] == 0.0
-        assert scores[4] == 0.0
+        # Failed reads are explicit so they can be excluded from selection.
+        assert scores[3] is None
+        assert scores[4] is None
     
     def test_laplacian_variance_calculation(self, test_images_directory):
         """Test the core Laplacian variance sharpness algorithm."""
@@ -279,8 +331,8 @@ class TestSharpnessAnalyzer:
         with patch.object(self.analyzer, '_calculate_single_frame_sharpness', side_effect=mock_single_calculation):
             scores = self.analyzer._calculate_sharpness_parallel(frame_paths)
             
-            # Should return scores for all frames, with 0.0 for failed ones
+            # Should return scores for all frames, with failures marked explicitly.
             assert len(scores) == 3
             assert scores[0] == 100.0  # Valid
-            assert scores[1] == 0.0    # Failed (fallback)
+            assert scores[1] is None
             assert scores[2] == 100.0  # Valid

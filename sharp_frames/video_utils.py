@@ -6,6 +6,7 @@ Provides utilities for detecting and processing video files in directories.
 
 import os
 import platform
+import re
 from typing import List, Optional
 
 # Keep media-format support in one place so validation and processing cannot drift.
@@ -18,6 +19,19 @@ SUPPORTED_IMAGE_EXTENSIONS = frozenset({
     '.bmp', '.jpeg', '.jpg', '.pbm', '.pgm', '.png', '.ppm', '.tif',
     '.tiff', '.webp',
 })
+
+_NATURAL_NUMBER = re.compile(r"(\d+)")
+
+
+def natural_path_key(path: str) -> tuple:
+    """Return a deterministic, case-insensitive key for numbered filenames."""
+    name = os.path.basename(os.fspath(path))
+    parts = tuple(
+        (1, int(part)) if part.isdigit() else (0, part.casefold())
+        for part in _NATURAL_NUMBER.split(name)
+        if part
+    )
+    return parts, name.casefold(), name
 
 
 def get_ffmpeg_installation_hint(system_name: Optional[str] = None) -> str:
@@ -57,7 +71,7 @@ def get_video_files_in_directory(directory_path: str) -> List[str]:
             if ext in SUPPORTED_VIDEO_EXTENSIONS:
                 video_files.append(file_path)
     
-    return sorted(video_files)
+    return sorted(video_files, key=natural_path_key)
 
 
 def detect_input_type(input_path: str) -> str:

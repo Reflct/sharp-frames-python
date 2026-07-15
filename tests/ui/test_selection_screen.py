@@ -5,7 +5,10 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
+from rich.cells import cell_len
 from textual.app import App, ComposeResult
+from textual.containers import Container
+from textual.widgets import Button, Input
 
 from sharp_frames.models.frame_data import ExtractionResult, FrameData
 from sharp_frames.ui.screens.selection import (
@@ -13,6 +16,7 @@ from sharp_frames.ui.screens.selection import (
     SelectionScreen,
     SharpnessChart,
 )
+from sharp_frames.ui.styles import SHARP_FRAMES_CSS
 
 
 @pytest.fixture
@@ -54,6 +58,19 @@ def test_initial_state_matches_visible_default_controls(screen):
         "batched",
         "outlier_removal",
     }
+
+
+def test_frame_summary_reports_excluded_unreadable_inputs(screen):
+    screen.extraction_result.metadata["sharpness_analysis"] = {
+        "input_count": 23,
+        "analyzed_count": 20,
+        "unreadable_count": 3,
+        "unreadable_paths": ["a.png", "b.png", "c.png"],
+    }
+
+    assert screen._frame_count_summary() == (
+        "Choose from 20 analyzed frames | 3 unreadable excluded"
+    )
 
 
 def test_method_definitions_expose_valid_defaults_and_ranges(screen):
@@ -165,6 +182,7 @@ def test_chart_normalizes_scores_without_discarding_frames(extraction_result):
     assert chart.max_score == 5_000.0
     assert chart.score_range == 4_999.0
     assert chart.selected_indices == {2, 4, 4_999}
+    assert chart.border_title == "Frame selection"
 
 
 @pytest.mark.asyncio
@@ -176,6 +194,8 @@ async def test_chart_scrolls_across_thousands_of_frames():
     chart = SharpnessChart(frames)
 
     class ChartApp(App):
+        CSS = SHARP_FRAMES_CSS
+
         def compose(self) -> ComposeResult:
             yield chart
 
@@ -188,8 +208,17 @@ async def test_chart_scrolls_across_thousands_of_frames():
         background_style = chart.get_component_rich_style(
             "sharpness-chart--background"
         )
+        title_style = chart.get_component_rich_style(
+            "sharpness-chart--title"
+        )
         assert background_style.bgcolor is not None
-        assert "Frames 1-39 of 5,000" in chart.render_line(0).text
+        assert title_style.bgcolor == background_style.bgcolor
+        title_line = chart.render_line(0)
+        assert "Frames 1-39 of 5,000" in title_line.text
+        assert all(
+            segment.style.bgcolor == background_style.bgcolor
+            for segment in title_line
+        )
         bottom_line = chart.render_line(chart.scrollable_content_region.height - 1)
         assert bottom_line.text[:8] == "█ █ █ █ "
 
@@ -217,3 +246,41 @@ def test_input_with_controls_retains_value_before_mount():
     assert control.value == "5"
     control.value = "7"
     assert control.value == "7"
+
+
+@pytest.mark.asyncio
+async def test_input_stepper_uses_compact_secondary_buttons():
+    control = InputWithControls(
+        value="5", input_id="batch-size", min_value=1, max_value=10
+    )
+
+    class StepperApp(App):
+        CSS = SHARP_FRAMES_CSS
+
+        def compose(self) -> ComposeResult:
+            yield control
+
+    async with StepperApp().run_test(size=(60, 12)) as pilot:
+        await pilot.pause()
+
+        decrement = control.query_one("#batch-size_dec", Button)
+        increment = control.query_one("#batch-size_inc", Button)
+        field = control.query_one("#batch-size", Input)
+        button_group = control.query_one(".stepper-controls", Container)
+
+        increment.focus()
+        await pilot.pause()
+        field_border = field.styles.border_top[1]
+
+        assert str(decrement.label) == "−"
+        assert str(increment.label) == "+"
+        assert decrement.variant == "default"
+        assert increment.variant == "default"
+        assert field_border.r == field_border.g == field_border.b
+        assert decrement.region.width >= decrement.region.height
+        assert increment.region.width >= increment.region.height
+        for button in (decrement, increment):
+            inner_width = button.region.width - 2  # Tall border consumes one cell per side.
+            assert (inner_width - cell_len(str(button.label))) % 2 == 0
+        assert button_group.region.width == 14
+        assert increment.region.x == decrement.region.right
