@@ -108,7 +108,7 @@ def test_distribution_tracks_duplicate_frame_metadata_by_input_position():
     assert sum(preview["distribution"][5:]) == 1
 
 
-def test_outlier_preview_uses_actual_scores_and_window_size():
+def test_outlier_preview_enforces_a_meaningful_minimum_window():
     frames = make_frames([100, 100, 100, 1, 100, 100, 100])
 
     small_window = get_selection_count(
@@ -124,7 +124,7 @@ def test_outlier_preview_uses_actual_scores_and_window_size():
         outlier_window_size=7,
     )
 
-    assert small_window == 7
+    assert small_window == 6
     assert large_window == 6
 
 

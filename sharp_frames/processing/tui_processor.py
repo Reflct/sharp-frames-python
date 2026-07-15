@@ -339,13 +339,13 @@ class TUIProcessor:
                 return False, "Parameter 'batch_buffer' must be a non-negative integer"
         
         elif method == 'outlier_removal':
-            outlier_sensitivity = params.get('outlier_sensitivity', 50)
+            outlier_sensitivity = params.get('outlier_sensitivity', 60)
             if not isinstance(outlier_sensitivity, int) or not (0 <= outlier_sensitivity <= 100):
                 return False, "Parameter 'outlier_sensitivity' must be an integer between 0 and 100"
             
             outlier_window_size = params.get('outlier_window_size', 15)
-            if not isinstance(outlier_window_size, int) or outlier_window_size <= 0:
-                return False, "Parameter 'outlier_window_size' must be a positive integer"
+            if not isinstance(outlier_window_size, int) or outlier_window_size < 5:
+                return False, "Parameter 'outlier_window_size' must be at least 5"
         
         else:
             return False, f"Unknown selection method: {method}"

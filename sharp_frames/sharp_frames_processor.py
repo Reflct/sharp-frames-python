@@ -56,7 +56,7 @@ class SharpFrames:
 
                  # --- Parameters for 'outlier-removal' selection ---
                  outlier_window_size: int = 15,
-                 outlier_sensitivity: int = 50,
+                 outlier_sensitivity: int = 60,
                  
                  # --- Parameters for image resizing ---
                  width: int = 0):
@@ -198,7 +198,7 @@ class SharpFrames:
                 self.batch_buffer
             )
         elif self.selection_method == "outlier-removal":
-            # Outlier removal returns all frames with a 'selected' flag
+            # Outlier detection returns all frames with a 'selected' flag
             all_frames_data = select_outlier_removal_frames(
                 frames_with_scores,
                 self.outlier_window_size,

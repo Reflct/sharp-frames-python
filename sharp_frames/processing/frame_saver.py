@@ -382,7 +382,7 @@ class FrameSaver:
             })
         elif selection_method == 'outlier_removal':
             params.update({
-                "outlier_sensitivity": config.get('outlier_sensitivity', 50),
+                "outlier_sensitivity": config.get('outlier_sensitivity', 60),
                 "outlier_window_size": config.get('outlier_window_size', 15)
             })
         

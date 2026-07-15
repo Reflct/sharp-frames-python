@@ -481,11 +481,11 @@ class SelectionScreen(Screen):
                 }
             },
             "outlier_removal": {
-                "name": "Outlier Removal",
+                "name": "Outlier Detection",
                 "description": "Remove frames with unusually low sharpness scores compared to neighbors",
                 "parameters": {
-                    "outlier_sensitivity": {"type": "int", "default": 50, "min": 0, "max": 100, "label": "Removal aggressiveness (0-100)"},
-                    "outlier_window_size": {"type": "int", "default": 15, "min": 3, "max": 30, "label": "Neighbor comparison window"}
+                    "outlier_sensitivity": {"type": "int", "default": 60, "min": 0, "max": 100, "label": "Detection sensitivity (0-100)"},
+                    "outlier_window_size": {"type": "int", "default": 15, "min": 5, "max": 31, "label": "Local comparison window"}
                 }
             }
         }
@@ -707,7 +707,7 @@ Choose how to select the best frames from your analyzed video/images.
 
 **Batched Selection**: Divide all frames into equal groups and pick the sharpest from each group. Great for ensuring even coverage across the entire video.
 
-**Outlier Removal**: Automatically remove frames that are significantly blurrier than their neighbors. Best when you want to keep most frames but remove the obviously bad ones.
+**Outlier Detection**: Automatically reject frames that are significantly blurrier than their local neighbors. Best when you want to keep most frames but remove clear sharpness outliers.
 
 ## How It Works
 

@@ -351,7 +351,7 @@ class ConfigurationForm(Screen):
 ## Selection Process
 
 After configuration, frames will be extracted and analyzed. You'll then see an interactive selection screen where you can:
-- Choose selection method (Best N, Batched, Outlier Removal)
+- Choose selection method (Best N, Batched, Outlier Detection)
 - Adjust parameters with real-time preview
 - See exactly how many frames will be selected
 

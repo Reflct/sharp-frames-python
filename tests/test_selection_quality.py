@@ -150,3 +150,40 @@ def test_labeled_blur_probe_tracks_rejection_precision_and_recall():
 
     assert precision == 1.0
     assert recall == 1.0
+
+
+def test_default_outlier_detection_requires_a_meaningful_relative_drop():
+    scores = [100.0] * 15
+    scores[5] = 90.0
+    scores[9] = 75.0
+    frames = [
+        {"index": index, "sharpnessScore": score}
+        for index, score in enumerate(scores)
+    ]
+
+    assessed = select_outlier_removal_frames_core(
+        frames,
+        window_size=15,
+        sensitivity=60,
+    )
+
+    assert assessed[5]["selected"] is True
+    assert assessed[9]["selected"] is False
+
+
+def test_log_scaled_outlier_detection_is_consistent_across_score_magnitudes():
+    def rejected_dip(baseline, dip):
+        scores = [baseline] * 15
+        scores[7] = dip
+        frames = [
+            {"index": index, "sharpnessScore": score}
+            for index, score in enumerate(scores)
+        ]
+        return not select_outlier_removal_frames_core(
+            frames,
+            window_size=15,
+            sensitivity=60,
+        )[7]["selected"]
+
+    assert rejected_dip(10.0, 7.0) is True
+    assert rejected_dip(1_000.0, 700.0) is True

@@ -4,6 +4,8 @@ from typing import Any, Dict, List
 
 from ..models.frame_data import FrameData
 from ..selection_methods import (
+    OUTLIER_DEFAULT_SENSITIVITY,
+    OUTLIER_DEFAULT_WINDOW_SIZE,
     select_batched_frames_core,
     select_best_n_frames_core,
     select_outlier_removal_frames_core,
@@ -47,8 +49,8 @@ class FrameSelector:
         if method in {"outlier_removal", "outlier-removal"}:
             return self._select_outlier_removal_frames(
                 frames,
-                params.get("outlier_sensitivity", 50),
-                params.get("outlier_window_size", 15),
+                params.get("outlier_sensitivity", OUTLIER_DEFAULT_SENSITIVITY),
+                params.get("outlier_window_size", OUTLIER_DEFAULT_WINDOW_SIZE),
             )
         raise ValueError(f"Unsupported selection method: {method}")
 

@@ -4,6 +4,8 @@ from collections import Counter
 from typing import Any, Dict, List, Sequence, Tuple
 
 from .selection_methods import (
+    OUTLIER_DEFAULT_SENSITIVITY,
+    OUTLIER_DEFAULT_WINDOW_SIZE,
     select_batched_frames_core,
     select_best_n_frames_core,
     select_outlier_removal_frames_core,
@@ -33,8 +35,8 @@ def _select_for_preview(
     if method in {"outlier-removal", "outlier_removal"}:
         assessed = select_outlier_removal_frames_core(
             frames,
-            params.get("outlier_window_size", 15),
-            params.get("outlier_sensitivity", 50),
+            params.get("outlier_window_size", OUTLIER_DEFAULT_WINDOW_SIZE),
+            params.get("outlier_sensitivity", OUTLIER_DEFAULT_SENSITIVITY),
             params.get("min_neighbors", 3),
             params.get("threshold_divisor", 4.0),
         )

@@ -1,6 +1,7 @@
 """Canonical frame-selection algorithms shared by the CLI and TUI."""
 
 from collections import OrderedDict
+from math import log1p
 from statistics import median
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
@@ -9,6 +10,13 @@ from tqdm import tqdm
 
 Frame = Dict[str, Any]
 PositionedFrame = Tuple[int, Frame]
+
+OUTLIER_DEFAULT_WINDOW_SIZE = 15
+OUTLIER_DEFAULT_SENSITIVITY = 60
+OUTLIER_MIN_WINDOW_SIZE = 5
+OUTLIER_MIN_RELATIVE_DROP = 0.05
+OUTLIER_MAX_RELATIVE_DROP = 0.30
+OUTLIER_MIN_ROBUST_THRESHOLD = 1.5
 
 
 def _source_key(frame: Frame) -> Optional[str]:
@@ -191,35 +199,61 @@ def _outlier_positions(
     if sensitivity <= 0 or not group:
         return set()
 
-    scores = [float(frame.get("sharpnessScore", 0) or 0) for _, frame in group]
+    raw_scores = [
+        max(0.0, float(frame.get("sharpnessScore", 0) or 0))
+        for _, frame in group
+    ]
+    scores = [log1p(score) for score in raw_scores]
 
-    actual_window_size = max(1, window_size)
+    actual_window_size = max(OUTLIER_MIN_WINDOW_SIZE, window_size)
     if actual_window_size % 2 == 0:
         actual_window_size += 1
     half_window = actual_window_size // 2
     maximum_threshold = threshold_divisor if threshold_divisor > 0 else 4.0
     sensitivity_ratio = min(100, sensitivity) / 100
-    robust_threshold = 0.5 + ((maximum_threshold - 0.5) * (1 - sensitivity_ratio))
+    robust_threshold = OUTLIER_MIN_ROBUST_THRESHOLD + (
+        (maximum_threshold - OUTLIER_MIN_ROBUST_THRESHOLD)
+        * (1 - sensitivity_ratio)
+    )
+    minimum_relative_drop = OUTLIER_MAX_RELATIVE_DROP - (
+        (OUTLIER_MAX_RELATIVE_DROP - OUTLIER_MIN_RELATIVE_DROP)
+        * sensitivity_ratio
+    )
     outliers: Set[int] = set()
 
     for position, current_score in enumerate(scores):
         window_start = max(0, position - half_window)
         window_end = min(len(group), position + half_window + 1)
         neighbor_scores = scores[window_start:position] + scores[position + 1 : window_end]
-        if not neighbor_scores or len(neighbor_scores) < max(0, min_neighbors):
+        required_neighbors = max(2, min_neighbors)
+        if len(neighbor_scores) < required_neighbors:
             continue
         neighbor_median = median(neighbor_scores)
+        raw_neighbor_scores = (
+            raw_scores[window_start:position]
+            + raw_scores[position + 1 : window_end]
+        )
+        raw_neighbor_median = median(raw_neighbor_scores)
         absolute_deviations = [
             abs(score - neighbor_median) for score in neighbor_scores
         ]
         median_absolute_deviation = median(absolute_deviations)
         robust_scale = median_absolute_deviation * 1.4826
         if robust_scale == 0:
-            robust_scale = max(abs(neighbor_median) * 0.05, 1e-9)
+            robust_scale = max(abs(neighbor_median) * 0.01, 1e-9)
 
         deficit = neighbor_median - current_score
         robust_deficit = deficit / robust_scale
-        if deficit > 0 and robust_deficit > robust_threshold:
+        relative_drop = (
+            (raw_neighbor_median - raw_scores[position]) / raw_neighbor_median
+            if raw_neighbor_median > 0
+            else 0.0
+        )
+        if (
+            deficit > 0
+            and relative_drop >= minimum_relative_drop
+            and robust_deficit > robust_threshold
+        ):
             outliers.add(position)
     return outliers
 
@@ -284,7 +318,7 @@ def select_outlier_removal_frames(
         progress_bar.update(len(result))
     selected_count = sum(frame["selected"] for frame in result)
     print(
-        f"Outlier removal: Marked {len(result) - selected_count} outliers. "
+        f"Outlier detection: Marked {len(result) - selected_count} outliers. "
         f"Keeping {selected_count} frames."
     )
     return result

@@ -65,10 +65,10 @@ Divides content into batches and selects the sharpest frame from each batch.
 --selection-method batched --batch-size 5 --batch-buffer 2
 ```
 
-### Outlier Removal
+### Outlier Detection
 Removes unusually blurry frames by comparing each frame to its neighbors.
 ```bash
---selection-method outlier-removal --outlier-window-size 15 --outlier-sensitivity 50
+--selection-method outlier-removal --outlier-window-size 15 --outlier-sensitivity 60
 ```
 
 ## Command Line Options
@@ -84,8 +84,8 @@ Removes unusually blurry frames by comparing each frame to its neighbors.
 - `--min-buffer <int>`: Minimum number of intervening frames between selected frames (best-n, default: 3)
 - `--batch-size <int>`: Frames per batch (batched, default: 5)
 - `--batch-buffer <int>`: Frames to skip between batches (batched, default: 2)
-- `--outlier-window-size <int>`: Neighbor comparison window (outlier-removal, default: 15)
-- `--outlier-sensitivity <int>`: Removal aggressiveness 0-100 (outlier-removal, default: 50)
+- `--outlier-window-size <int>`: Local comparison window, minimum 5 (outlier-removal, default: 15)
+- `--outlier-sensitivity <int>`: Detection sensitivity 0-100 (outlier-removal, default: 60)
 
 ## Examples
 
