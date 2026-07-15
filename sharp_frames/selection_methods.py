@@ -1,7 +1,7 @@
 """Canonical frame-selection algorithms shared by the CLI and TUI."""
 
 from collections import OrderedDict
-from math import log1p
+from math import expm1, log1p
 from statistics import median
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
@@ -14,8 +14,8 @@ PositionedFrame = Tuple[int, Frame]
 OUTLIER_DEFAULT_WINDOW_SIZE = 15
 OUTLIER_DEFAULT_SENSITIVITY = 60
 OUTLIER_MIN_WINDOW_SIZE = 5
-OUTLIER_MIN_RELATIVE_DROP = 0.05
-OUTLIER_MAX_RELATIVE_DROP = 0.30
+OUTLIER_MIN_RELATIVE_DROP = 0.005
+OUTLIER_MAX_RELATIVE_DROP = 0.08
 OUTLIER_MIN_ROBUST_THRESHOLD = 1.5
 
 
@@ -204,6 +204,20 @@ def _outlier_positions(
         for _, frame in group
     ]
     scores = [log1p(score) for score in raw_scores]
+    dip_magnitudes = [0.0] * len(scores)
+    relative_drops = [0.0] * len(scores)
+    for position in range(1, len(scores) - 1):
+        # A local dip must sit below both adjacent frames. Using the lower
+        # neighbor as the baseline prevents one unusually sharp neighbor from
+        # making an otherwise ordinary frame look like an outlier.
+        expected_score = min(scores[position - 1], scores[position + 1])
+        dip_magnitudes[position] = max(0.0, expected_score - scores[position])
+        expected_raw_score = expm1(expected_score)
+        if expected_raw_score > 0:
+            relative_drops[position] = max(
+                0.0,
+                (expected_raw_score - raw_scores[position]) / expected_raw_score,
+            )
 
     actual_window_size = max(OUTLIER_MIN_WINDOW_SIZE, window_size)
     if actual_window_size % 2 == 0:
@@ -221,38 +235,33 @@ def _outlier_positions(
     )
     outliers: Set[int] = set()
 
-    for position, current_score in enumerate(scores):
+    for position, dip_magnitude in enumerate(dip_magnitudes):
+        if position == 0 or position == len(scores) - 1:
+            continue
         window_start = max(0, position - half_window)
         window_end = min(len(group), position + half_window + 1)
-        neighbor_scores = scores[window_start:position] + scores[position + 1 : window_end]
-        required_neighbors = max(2, min_neighbors)
-        if len(neighbor_scores) < required_neighbors:
-            continue
-        neighbor_median = median(neighbor_scores)
-        raw_neighbor_scores = (
-            raw_scores[window_start:position]
-            + raw_scores[position + 1 : window_end]
+        neighbor_dips = (
+            dip_magnitudes[window_start:position]
+            + dip_magnitudes[position + 1 : window_end]
         )
-        raw_neighbor_median = median(raw_neighbor_scores)
+        required_neighbors = max(2, min_neighbors)
+        if len(neighbor_dips) < required_neighbors:
+            continue
+        neighbor_median = median(neighbor_dips)
         absolute_deviations = [
-            abs(score - neighbor_median) for score in neighbor_scores
+            abs(neighbor_dip - neighbor_median) for neighbor_dip in neighbor_dips
         ]
         median_absolute_deviation = median(absolute_deviations)
         robust_scale = median_absolute_deviation * 1.4826
         if robust_scale == 0:
             robust_scale = max(abs(neighbor_median) * 0.01, 1e-9)
 
-        deficit = neighbor_median - current_score
-        robust_deficit = deficit / robust_scale
-        relative_drop = (
-            (raw_neighbor_median - raw_scores[position]) / raw_neighbor_median
-            if raw_neighbor_median > 0
-            else 0.0
-        )
+        excess_dip = dip_magnitude - neighbor_median
+        robust_excess = excess_dip / robust_scale
         if (
-            deficit > 0
-            and relative_drop >= minimum_relative_drop
-            and robust_deficit > robust_threshold
+            excess_dip > 0
+            and relative_drops[position] >= minimum_relative_drop
+            and robust_excess > robust_threshold
         ):
             outliers.add(position)
     return outliers

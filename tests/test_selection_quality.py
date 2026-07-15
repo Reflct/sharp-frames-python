@@ -154,7 +154,7 @@ def test_labeled_blur_probe_tracks_rejection_precision_and_recall():
 
 def test_default_outlier_detection_requires_a_meaningful_relative_drop():
     scores = [100.0] * 15
-    scores[5] = 90.0
+    scores[5] = 98.0
     scores[9] = 75.0
     frames = [
         {"index": index, "sharpnessScore": score}
@@ -187,3 +187,48 @@ def test_log_scaled_outlier_detection_is_consistent_across_score_magnitudes():
 
     assert rejected_dip(10.0, 7.0) is True
     assert rejected_dip(1_000.0, 700.0) is True
+
+
+def test_smooth_trough_is_not_mistaken_for_an_outlier_cluster():
+    scores = [
+        162.32, 162.21, 161.43, 159.67, 160.00, 159.41, 159.17,
+        157.90, 158.01, 160.00, 160.01, 160.47, 160.46, 160.53,
+        160.82, 160.60, 160.10, 159.10, 158.01, 157.06, 155.20,
+        152.87, 149.68, 148.97, 150.22, 153.09, 156.55, 158.64,
+        159.78, 160.12, 160.68, 161.82, 162.06, 162.84, 162.69,
+        163.60, 165.84, 165.63, 164.79, 163.05,
+    ]
+    frames = [
+        {"index": index, "sharpnessScore": score}
+        for index, score in enumerate(scores)
+    ]
+
+    assessed = select_outlier_removal_frames_core(
+        frames,
+        window_size=31,
+        sensitivity=100,
+    )
+
+    assert all(assessed[position]["selected"] for position in (22, 23, 24))
+
+
+def test_abrupt_dip_in_a_broad_trend_is_detected_at_maximum_sensitivity():
+    scores = [
+        191.30, 190.19, 191.34, 189.59, 188.12, 185.22, 180.47,
+        177.02, 173.26, 170.84, 168.32, 165.99, 163.30, 162.04,
+        165.47, 166.67, 169.98, 173.32, 172.83, 169.09, 169.62,
+        169.61, 168.71, 167.32, 164.46, 162.95, 162.07, 160.60,
+        158.71, 157.39, 155.58,
+    ]
+    frames = [
+        {"index": index, "sharpnessScore": score}
+        for index, score in enumerate(scores)
+    ]
+
+    assessed = select_outlier_removal_frames_core(
+        frames,
+        window_size=31,
+        sensitivity=100,
+    )
+
+    assert assessed[13]["selected"] is False
