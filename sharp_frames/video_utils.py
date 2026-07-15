@@ -39,7 +39,7 @@ def get_ffmpeg_installation_hint(system_name: Optional[str] = None) -> str:
     current_system = system_name or platform.system()
     if current_system == 'Windows':
         return (
-            "Install a full FFmpeg build from https://ffmpeg.org/download.html "
+            "Install FFmpeg using a full build from https://ffmpeg.org/download.html "
             "and add its bin directory to PATH."
         )
     if current_system == 'Darwin':
