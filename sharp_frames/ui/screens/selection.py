@@ -33,6 +33,8 @@ class SharpnessChart(ScrollView):
     """Horizontally scrollable frame-by-frame sharpness timeline."""
 
     FRAME_STRIDE = 2
+    BAR_GLYPHS = (" ", "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█")
+    VERTICAL_SUBDIVISIONS = len(BAR_GLYPHS) - 1
     can_focus = True
 
     BINDINGS = [
@@ -53,7 +55,7 @@ class SharpnessChart(ScrollView):
 
     DEFAULT_CSS = """
     SharpnessChart {
-        height: 12;
+        height: 13;
         width: 100%;
         border: solid $primary;
         margin: 1 0;
@@ -212,8 +214,8 @@ class SharpnessChart(ScrollView):
 
         frame = self.frames[frame_position]
         normalized = (frame.sharpness_score - self.min_score) / self.score_range
-        bar_height = 1 + int(normalized * (chart_height - 1))
-        if (chart_height - 1 - chart_y) >= bar_height:
+        glyph = self._bar_glyph(normalized, chart_y, chart_height)
+        if glyph == " ":
             return Segment(" ", blank_style)
 
         style = (
@@ -221,7 +223,21 @@ class SharpnessChart(ScrollView):
             if frame.index in self.selected_indices
             else unselected_style
         )
-        return Segment("█", style)
+        return Segment(glyph, style)
+
+    @classmethod
+    def _bar_glyph(
+        cls, normalized: float, chart_y: int, chart_height: int
+    ) -> str:
+        """Render a bar cell with eighth-row vertical precision."""
+        subdivisions = cls.VERTICAL_SUBDIVISIONS
+        available_units = max(chart_height * subdivisions, 1)
+        clamped = max(0.0, min(float(normalized), 1.0))
+        filled_units = max(1, int((clamped * available_units) + 0.5))
+        row_from_bottom = chart_height - 1 - chart_y
+        units_in_row = filled_units - (row_from_bottom * subdivisions)
+        units_in_row = max(0, min(units_in_row, subdivisions))
+        return cls.BAR_GLYPHS[units_in_row]
 
     def _visible_frame_range(self, width: int) -> tuple[int, int]:
         """Return the frame positions represented by the visible viewport."""

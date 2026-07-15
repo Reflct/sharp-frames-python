@@ -185,6 +185,13 @@ def test_chart_normalizes_scores_without_discarding_frames(extraction_result):
     assert chart.border_title == "Frame selection"
 
 
+def test_chart_uses_fractional_blocks_for_sub_row_precision():
+    assert SharpnessChart._bar_glyph(0.0, chart_y=2, chart_height=3) == "▁"
+    assert SharpnessChart._bar_glyph(1.0, chart_y=0, chart_height=3) == "█"
+    assert SharpnessChart._bar_glyph(0.5, chart_y=1, chart_height=3) == "▄"
+    assert SharpnessChart._bar_glyph(0.5, chart_y=0, chart_height=3) == " "
+
+
 @pytest.mark.asyncio
 async def test_chart_scrolls_across_thousands_of_frames():
     frames = [
@@ -220,7 +227,7 @@ async def test_chart_scrolls_across_thousands_of_frames():
             for segment in title_line
         )
         bottom_line = chart.render_line(chart.scrollable_content_region.height - 1)
-        assert bottom_line.text[:8] == "█ █ █ █ "
+        assert bottom_line.text[:8] == "▁ ▁ ▁ ▁ "
 
         chart.focus()
         await pilot.press("right")

@@ -421,7 +421,7 @@ Select.-invalid {
 
 /* Sharpness chart */
 SharpnessChart {
-    height: 12;
+    height: 13;
     width: 100%;
     border: solid $primary;
     margin: 1 0;
@@ -486,6 +486,25 @@ InputWithControls {
     height: 3;
     layout: horizontal;
     margin: 0 0 1 0;
+}
+
+/* Keep the parameter panel dense so its controls sit close to the title and
+   the panel does not leave an oversized empty footer. */
+#parameter_container {
+    padding: 1 2 0 1;
+    min-height: 10;
+}
+
+#parameter_container .control_label,
+#parameter_container .parameter_inputs,
+#parameter_container .param_label,
+#parameter_container .param_input_with_controls,
+#parameter_container InputWithControls {
+    margin: 0;
+}
+
+#parameter_container .parameter_inputs {
+    min-height: 0;
 }
 
 InputWithControls Input {
