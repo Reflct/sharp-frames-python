@@ -245,6 +245,64 @@ async def test_chart_scrolls_across_thousands_of_frames():
         assert chart.scroll_offset.x == 0
 
 
+@pytest.mark.asyncio
+async def test_clicking_chart_bar_requests_frame_inspection():
+    frames = [
+        FrameData(f"/tmp/frame_{index:05d}.jpg", index, float(index + 1))
+        for index in range(100)
+    ]
+    chart = SharpnessChart(frames)
+
+    class ChartApp(App):
+        CSS = SHARP_FRAMES_CSS
+
+        def __init__(self):
+            super().__init__()
+            self.inspected = []
+
+        def compose(self) -> ComposeResult:
+            yield chart
+
+        def on_sharpness_chart_frame_inspect_requested(self, event):
+            self.inspected.append(event.frame)
+
+    app = ChartApp()
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.pause()
+        await pilot.click(chart, offset=(1, 2))
+        await pilot.pause()
+
+        assert app.inspected == [frames[0]]
+        assert chart.inspected_index == frames[0].index
+
+        chart.scroll_to(x=SharpnessChart.FRAME_STRIDE * 2, animate=False)
+        await pilot.pause()
+        await pilot.click(chart, offset=(1, 2))
+        await pilot.pause()
+
+        assert app.inspected[-1] == frames[2]
+        assert chart.inspected_index == frames[2].index
+
+
+@pytest.mark.asyncio
+async def test_frame_inspection_handler_opens_analyzed_path(screen):
+    frame = screen.extraction_result.frames[3]
+    event = SimpleNamespace(frame=frame)
+
+    with (
+        patch(
+            "sharp_frames.ui.screens.selection.asyncio.to_thread",
+            new=AsyncMock(),
+        ) as to_thread,
+        patch.object(screen, "notify") as notify,
+    ):
+        await screen.on_sharpness_chart_frame_inspect_requested(event)
+
+    to_thread.assert_awaited_once()
+    assert to_thread.await_args.args[1] == frame.path
+    assert notify.call_args.kwargs["title"] == "Opened image"
+
+
 def test_input_with_controls_retains_value_before_mount():
     control = InputWithControls(
         value="5", input_id="batch-size", min_value=1, max_value=10

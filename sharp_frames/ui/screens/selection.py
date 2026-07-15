@@ -9,7 +9,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal
 from textual.css.query import NoMatches
-from textual.events import Resize
+from textual.events import Click, Resize
 from textual.geometry import Size
 from textual.message import Message
 from textual.reactive import reactive
@@ -27,6 +27,7 @@ from rich.style import Style
 from ...models.frame_data import ExtractionResult, FrameData
 from ...processing.tui_processor import TUIProcessor
 from ..keyboard import OptionSelect, select_focused_option
+from ..utils.image_opener import open_image_file
 
 
 class SharpnessChart(ScrollView):
@@ -50,6 +51,7 @@ class SharpnessChart(ScrollView):
         "sharpness-chart--background",
         "sharpness-chart--selected",
         "sharpness-chart--unselected",
+        "sharpness-chart--inspected",
         "sharpness-chart--title",
     }
 
@@ -84,6 +86,12 @@ class SharpnessChart(ScrollView):
         background: $background;
     }
 
+    SharpnessChart .sharpness-chart--inspected {
+        color: $warning;
+        background: $background;
+        text-style: bold;
+    }
+
     SharpnessChart .sharpness-chart--title {
         color: $primary;
         background: $background;
@@ -100,10 +108,13 @@ class SharpnessChart(ScrollView):
         super().__init__(**kwargs)
         self.frames = frames
         self.selected_indices = set(selected_indices or ())
+        self.inspected_index: Optional[int] = None
         self.timeline_width = max(len(frames) * self.FRAME_STRIDE, 1)
         self.virtual_size = Size(self.timeline_width, 1)
         self.border_title = "Frame selection"
-        self.border_subtitle = "Arrows scroll | Ctrl+PgUp/PgDn page | Home/End"
+        self.border_subtitle = (
+            "Click inspect | Arrows scroll | Ctrl+PgUp/PgDn page | Home/End"
+        )
 
         if self.frames:
             scores = [f.sharpness_score for f in self.frames]
@@ -127,6 +138,30 @@ class SharpnessChart(ScrollView):
         """Update the selection status and refresh the chart."""
         self.selected_indices = set(selected_indices)
         self.refresh()
+
+    class FrameInspectRequested(Message):
+        """Request that the owning screen open a frame for inspection."""
+
+        def __init__(self, frame: FrameData) -> None:
+            self.frame = frame
+            super().__init__()
+
+    def on_click(self, event: Click) -> None:
+        """Open the frame represented by a clicked chart column."""
+        content_offset = event.get_content_offset(self)
+        if content_offset is None or content_offset.y == 0:
+            return
+
+        virtual_column = int(self.scroll_offset.x) + content_offset.x
+        frame_position = virtual_column // self.FRAME_STRIDE
+        if not 0 <= frame_position < len(self.frames):
+            return
+
+        frame = self.frames[frame_position]
+        self.inspected_index = frame.index
+        self.refresh()
+        self.post_message(self.FrameInspectRequested(frame))
+        event.stop()
 
     def action_first_frame(self) -> None:
         """Scroll directly to the beginning of the analyzed timeline."""
@@ -182,6 +217,9 @@ class SharpnessChart(ScrollView):
         unselected_style = self.get_component_rich_style(
             "sharpness-chart--unselected"
         )
+        inspected_style = self.get_component_rich_style(
+            "sharpness-chart--inspected"
+        )
         segments = [
             self._render_timeline_column(
                 virtual_column,
@@ -189,6 +227,7 @@ class SharpnessChart(ScrollView):
                 chart_height,
                 selected_style,
                 unselected_style,
+                inspected_style,
                 blank_style,
             )
             for virtual_column in range(
@@ -205,6 +244,7 @@ class SharpnessChart(ScrollView):
         chart_height: int,
         selected_style: Style,
         unselected_style: Style,
+        inspected_style: Style,
         blank_style: Style,
     ) -> Segment:
         """Render a bar column or the blank gap following it."""
@@ -218,11 +258,12 @@ class SharpnessChart(ScrollView):
         if glyph == " ":
             return Segment(" ", blank_style)
 
-        style = (
-            selected_style
-            if frame.index in self.selected_indices
-            else unselected_style
-        )
+        if frame.index == self.inspected_index:
+            style = inspected_style
+        elif frame.index in self.selected_indices:
+            style = selected_style
+        else:
+            style = unselected_style
         return Segment(glyph, style)
 
     @classmethod
@@ -574,6 +615,27 @@ class SelectionScreen(Screen):
         
         yield Footer()
 
+    async def on_sharpness_chart_frame_inspect_requested(
+        self, event: SharpnessChart.FrameInspectRequested
+    ) -> None:
+        """Open a clicked frame in the platform's default image viewer."""
+        frame = event.frame
+        try:
+            await asyncio.to_thread(open_image_file, frame.path)
+        except (FileNotFoundError, OSError) as exc:
+            self.notify(
+                str(exc),
+                title="Unable to inspect frame",
+                severity="error",
+            )
+            return
+
+        self.notify(
+            f"Frame {frame.index + 1:,} · sharpness {frame.sharpness_score:.2f}",
+            title="Opened image",
+            timeout=3,
+        )
+
     def _frame_count_summary(self) -> str:
         """Summarize analyzed and excluded inputs for the title row."""
         analyzed_count = len(self.extraction_result.frames)
@@ -730,7 +792,8 @@ Choose how to select the best frames from your analyzed video/images.
 1. **Choose a method** from the dropdown
 2. **Adjust parameters** as needed 
 3. **Watch the count update** in real-time as you change settings
-4. **Press "Process"** when you're happy with the selection
+4. **Click a chart bar** to inspect that image in your default viewer
+5. **Press "Process"** when you're happy with the selection
 
 The preview count updates instantly as you make changes, so you can experiment freely!
 
