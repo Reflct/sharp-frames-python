@@ -5,19 +5,25 @@ All notable changes to the Sharp Frames project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.4.0] - 2026-07-16
+## [0.4.0] - 2026-07-18
 
 ### Added
-- Scrollable frame timeline with keyboard navigation and full-result visualization
+- Scrollable full-frame selection timeline with click-to-inspect and keyboard navigation
+- Inline terminal frame preview via Sixel/Kitty raster graphics with an external-viewer fallback
+- Automatic color space detection and conversion to sRGB for HDR and wide-gamut sources (BT.2020, HLG, PQ)
 - Resolution-normalized focus scoring for more consistent comparisons across source sizes
-- Cross-platform CI coverage for Python 3.10 through 3.13 on Linux, macOS, and Windows
+- Trend-aware outlier detection with improved defaults
+- Responsive selection layout that keeps the preview and chart visible on short terminals
+- Shared alpha-preserving image decode/resize/encode helpers
+- Cross-platform CI coverage for Python 3.10 through 3.13 on Linux, macOS, and Windows, plus the minimum supported Textual version
 - Regression coverage for selection quality, output collisions, cancellation, and runtime cleanup
 
 ### Changed
 - Selection methods now balance sharpness and temporal distribution more consistently
 - Frame extraction, analysis, preview, and saving pipelines provide stricter validation and failure reporting
 - Image-directory exports preserve content while correctly handling format conversion and case-insensitive filename collisions
-- Configuration and selection screens provide clearer controls, status, and keyboard behavior
+- Configuration and selection screens provide clearer controls, status, and keyboard behavior; the processing screen is vertically centered
+- Textual requirement raised to 5.0 or newer; new dependencies `textual-image` and `Pillow`
 
 ### Fixed
 - FFmpeg and FFprobe process cleanup, cancellation, timeout, and pipe handling
@@ -25,6 +31,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Selection previews disagreeing with the frames produced during processing
 - Output metadata reporting frames that were not successfully saved
 - Platform-specific dependency guidance and Windows-safe process startup
+- Start Over after saving returning to the middle of setup instead of the first step
+- Cancel during setup leaving the application running on an empty screen
 
 ## [0.3.1] - 2025-01-29
 
