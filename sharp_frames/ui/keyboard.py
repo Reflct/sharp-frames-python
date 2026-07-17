@@ -34,7 +34,7 @@ def select_focused_option(focused: Widget | None) -> None:
         return
 
     if isinstance(focused, RadioSet):
-        focused.action_toggle()
+        focused.action_toggle_button()
         return
 
     raise SkipAction

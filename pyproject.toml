@@ -29,7 +29,9 @@ dependencies = [
     "opencv-python>=4.5.0",
     "numpy>=1.19.0",
     "tqdm>=4.64.0",
-    "textual>=0.41.0",
+    "textual>=5.0.0",
+    "textual-image>=0.12.0,<0.13.0",
+    "Pillow>=9.0.0",
 ]
 
 [project.urls]

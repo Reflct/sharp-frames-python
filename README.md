@@ -128,7 +128,8 @@ sharp-frames photos selected --selection-method outlier-removal --outlier-sensit
 ## Requirements
 
 - Python 3.10 or higher
-- Dependencies installed automatically: `opencv-python`, `numpy`, `tqdm`, `textual`
+- Dependencies installed automatically: `opencv-python`, `numpy`, `tqdm`,
+  `textual`, `textual-image`
 - FFmpeg and FFprobe (for video processing only)
 - FFmpeg `zscale`/`libzimg` support (for HDR-to-SDR processing only)
 

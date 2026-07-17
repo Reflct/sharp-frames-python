@@ -237,28 +237,38 @@ def _default_color_info() -> VideoColorInfo:
     )
 
 
-def build_colorspace_filter(color_info: VideoColorInfo) -> Optional[str]:
+def build_colorspace_filter(
+    color_info: VideoColorInfo, width: int = 0
+) -> Optional[str]:
     """
     Build FFmpeg filter string for color space conversion to sRGB/BT.709.
 
     Args:
         color_info: Detected color space information
+        width: Optional output width to apply inside HDR conversion
 
     Returns:
         Filter string to add to -vf, or None if no conversion needed
     """
+    if color_info.color_matrix == ColorMatrix.BT2020_CL:
+        raise RuntimeError(
+            "BT.2020 constant-luminance video is not supported. "
+            "Convert the source to BT.2020 non-constant-luminance or BT.709 first."
+        )
+
     if not color_info.needs_conversion:
         return None
 
     if color_info.is_hdr:
-        return _build_hdr_to_sdr_filter(color_info)
-    elif color_info.is_wide_gamut_sdr:
+        return _build_hdr_to_sdr_filter(color_info, width)
+    if color_info.is_wide_gamut_sdr:
         return _build_wide_gamut_to_srgb_filter(color_info)
-    else:
-        return None
+    return None
 
 
-def _build_hdr_to_sdr_filter(color_info: VideoColorInfo) -> str:
+def _build_hdr_to_sdr_filter(
+    color_info: VideoColorInfo, width: int = 0
+) -> str:
     """
     Build HDR to SDR tone mapping filter.
 
@@ -282,22 +292,26 @@ def _build_hdr_to_sdr_filter(color_info: VideoColorInfo) -> str:
         primaries_in = "bt2020"  # Default to BT.2020 for HDR
 
     # Determine input matrix
-    if color_info.color_matrix in [ColorMatrix.BT2020_NCL, ColorMatrix.BT2020_CL]:
-        matrix_in = "bt2020nc"
-    else:
-        matrix_in = "bt2020nc"  # Default for HDR
+    matrix_in = "bt2020nc"
+    resize_options = (
+        f":w={width}:h=-2:f=lanczos" if width > 0 else ""
+    )
 
     if is_zscale_available():
+        # 4:2:0 requires even dimensions; preserve explicit odd widths with 4:4:4.
+        output_pixel_format = (
+            "yuv444p" if width > 0 and width % 2 else "yuv420p"
+        )
         # Full HDR to SDR pipeline with tone mapping
         # Explicitly specify input parameters for reliable conversion
         filter_chain = (
-            f"zscale=tin={transfer_in}:min={matrix_in}:pin={primaries_in}:"
-            f"t=linear:npl=100,"                # Linearize with input specs
+            f"zscale=tin={transfer_in}:min={matrix_in}:pin={primaries_in}"
+            f"{resize_options}:t=linear:npl=100,"  # Resize and linearize
             "format=gbrpf32le,"                  # High precision intermediate
             "zscale=p=bt709,"                    # Convert primaries to BT.709
             "tonemap=hable:desat=0,"             # Hable tone mapping (filmic)
             "zscale=t=bt709:m=bt709:r=tv,"       # Apply BT.709 transfer/matrix
-            "format=yuv420p"                     # Standard output format
+            f"format={output_pixel_format}"
         )
     else:
         raise RuntimeError(

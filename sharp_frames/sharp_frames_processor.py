@@ -16,6 +16,10 @@ import concurrent.futures # Add concurrent.futures import
 from tqdm import tqdm
 
 from .focus_scoring import calculate_focus_score
+from .image_output import (
+    canonical_image_format,
+    transcode_image,
+)
 
 # Import selection strategy functions
 from .selection_methods import (
@@ -492,31 +496,19 @@ class SharpFrames:
 
     def _extract_frames_legacy(self, duration: float = None, color_info=None) -> bool:
         """Deprecated pre-canonical FFmpeg runner retained for compatibility tests."""
-        from .processing.colorspace import build_colorspace_filter
+        from .processing.frame_extractor import FrameExtractor
 
         output_pattern = os.path.join(self.temp_dir, f"frame_%05d.{self.output_format}")
 
         # Set a timeout threshold for the process in case it hangs
         process_timeout_seconds = 3600 # 1 hour timeout for FFmpeg process
-
-        # Build the video filters string - order matters!
-        vf_filters = []
-
-        # 1. Color space conversion FIRST (before any other processing)
-        if color_info is not None:
-            colorspace_filter = build_colorspace_filter(color_info)
-            if colorspace_filter:
-                vf_filters.append(colorspace_filter)
-
-        # 2. FPS filter
-        vf_filters.append(f"fps={self.fps}")
-
-        # 3. Scaling filter (after color conversion)
-        if self.width > 0:
-            vf_filters.append(f"scale={self.width}:-2")  # -2 maintains aspect ratio and ensures even height
-
-        # Join all filters with commas
-        vf_string = ",".join(vf_filters)
+        vf_string = ",".join(
+            FrameExtractor._build_video_filters(
+                self.fps,
+                self.width,
+                color_info,
+            )
+        )
         
         command = [
             "ffmpeg",
@@ -840,24 +832,9 @@ class SharpFrames:
             try:
                 if self.input_type == "directory" and (
                     self.width > 0
-                    or self._canonical_image_format(src_path) != output_format
+                    or canonical_image_format(src_path) != output_format
                 ):
-                    img = cv2.imread(src_path)
-                    if img is None:
-                        raise ImageProcessingError(f"Failed to read image: {src_path}")
-
-                    if self.width > 0:
-                        height = int(img.shape[0] * (self.width / img.shape[1]))
-                        if height % 2 != 0:
-                            height += 1
-                        img = cv2.resize(
-                            img, (self.width, height), interpolation=cv2.INTER_AREA
-                        )
-
-                    if not cv2.imwrite(dst_path, img):
-                        raise ImageProcessingError(
-                            f"Failed to encode image as .{output_format}"
-                        )
+                    transcode_image(src_path, dst_path, self.width)
                 else:
                     shutil.copy2(src_path, dst_path)
             except Exception as e:
@@ -894,11 +871,6 @@ class SharpFrames:
             return False
 
         return failed_count == 0
-
-    @staticmethod
-    def _canonical_image_format(path: str) -> str:
-        extension = os.path.splitext(path)[1].lower().lstrip('.')
-        return {'jpeg': 'jpg', 'tif': 'tiff'}.get(extension, extension)
 
     @staticmethod
     def _plan_directory_output_names(

@@ -26,6 +26,7 @@ from rich.style import Style
 
 from ...models.frame_data import ExtractionResult, FrameData
 from ...processing.tui_processor import TUIProcessor
+from ..components.raster_preview import RasterImagePreview
 from ..keyboard import OptionSelect, select_focused_option
 from ..utils.image_opener import open_image_file
 
@@ -41,8 +42,11 @@ class SharpnessChart(ScrollView):
     BINDINGS = [
         Binding("left", "scroll_left", "Scroll Left", show=False),
         Binding("right", "scroll_right", "Scroll Right", show=False),
+        Binding("pageup", "previous_selected", "Previous Selected", show=False),
+        Binding("pagedown", "next_selected", "Next Selected", show=False),
         Binding("ctrl+pageup", "page_left", "Page Left", show=False),
         Binding("ctrl+pagedown", "page_right", "Page Right", show=False),
+        Binding("o", "open_inspected", "Open Frame", show=False),
         Binding("home", "first_frame", "First Frame", show=False),
         Binding("end", "last_frame", "Last Frame", show=False),
     ]
@@ -57,7 +61,8 @@ class SharpnessChart(ScrollView):
 
     DEFAULT_CSS = """
     SharpnessChart {
-        height: 13;
+        height: 1fr;
+        min-height: 13;
         width: 100%;
         border: solid $primary;
         margin: 1 0;
@@ -109,11 +114,13 @@ class SharpnessChart(ScrollView):
         self.frames = frames
         self.selected_indices = set(selected_indices or ())
         self.inspected_index: Optional[int] = None
+        self.inspected_position: Optional[int] = None
         self.timeline_width = max(len(frames) * self.FRAME_STRIDE, 1)
         self.virtual_size = Size(self.timeline_width, 1)
         self.border_title = "Frame selection"
         self.border_subtitle = (
-            "Click inspect | Arrows scroll | Ctrl+PgUp/PgDn page | Home/End"
+            "Click inspect | Arrows scroll | PgUp/PgDn selected | "
+            "Ctrl+PgUp/PgDn page | Home/End"
         )
 
         if self.frames:
@@ -140,7 +147,14 @@ class SharpnessChart(ScrollView):
         self.refresh()
 
     class FrameInspectRequested(Message):
-        """Request that the owning screen open a frame for inspection."""
+        """Request that the owning screen display a frame for inspection."""
+
+        def __init__(self, frame: FrameData) -> None:
+            self.frame = frame
+            super().__init__()
+
+    class FrameOpenRequested(Message):
+        """Request that the owning screen open an inspected frame externally."""
 
         def __init__(self, frame: FrameData) -> None:
             self.frame = frame
@@ -157,23 +171,93 @@ class SharpnessChart(ScrollView):
         if not 0 <= frame_position < len(self.frames):
             return
 
+        self._inspect_frame(frame_position)
+        event.stop()
+
+    def _inspect_frame(self, frame_position: int) -> None:
+        """Select a frame for inspection and keep its chart bar visible."""
+        if not 0 <= frame_position < len(self.frames):
+            return
+
         frame = self.frames[frame_position]
+        self.inspected_position = frame_position
         self.inspected_index = frame.index
+        self.border_subtitle = (
+            "Arrows inspect | PgUp/PgDn selected | "
+            "Ctrl+PgUp/PgDn page | O open | Home/End"
+        )
+        self._scroll_frame_into_view(frame_position)
         self.refresh()
         self.post_message(self.FrameInspectRequested(frame))
-        event.stop()
+
+    def _scroll_frame_into_view(self, frame_position: int) -> None:
+        """Scroll just enough to reveal the inspected frame's complete slot."""
+        viewport_width = max(self.scrollable_content_region.width, 1)
+        scroll_x = int(self.scroll_offset.x)
+        frame_left = frame_position * self.FRAME_STRIDE
+        frame_right = frame_left + self.FRAME_STRIDE
+
+        if frame_left < scroll_x:
+            self.scroll_to(x=frame_left, animate=False)
+        elif frame_right > scroll_x + viewport_width:
+            self.scroll_to(
+                x=frame_right - viewport_width,
+                animate=False,
+            )
 
     def action_first_frame(self) -> None:
         """Scroll directly to the beginning of the analyzed timeline."""
         self.scroll_to(x=0, animate=False)
 
     def action_scroll_left(self) -> None:
-        """Scroll left by one complete frame slot."""
+        """Inspect the previous frame, or scroll before inspection begins."""
+        if self.inspected_position is not None:
+            self._inspect_frame(self.inspected_position - 1)
+            return
         self.scroll_relative(x=-self.FRAME_STRIDE, animate=False)
 
     def action_scroll_right(self) -> None:
-        """Scroll right by one complete frame slot."""
+        """Inspect the next frame, or scroll before inspection begins."""
+        if self.inspected_position is not None:
+            self._inspect_frame(self.inspected_position + 1)
+            return
         self.scroll_relative(x=self.FRAME_STRIDE, animate=False)
+
+    def _inspect_selected_frame(self, direction: int) -> None:
+        """Inspect the nearest selected frame in the requested direction."""
+        if self.inspected_position is None:
+            positions = (
+                range(len(self.frames))
+                if direction > 0
+                else range(len(self.frames) - 1, -1, -1)
+            )
+        else:
+            positions = range(
+                self.inspected_position + direction,
+                len(self.frames) if direction > 0 else -1,
+                direction,
+            )
+
+        for position in positions:
+            if self.frames[position].index in self.selected_indices:
+                self._inspect_frame(position)
+                return
+
+    def action_previous_selected(self) -> None:
+        """Inspect the previous frame retained by the current selection."""
+        self._inspect_selected_frame(-1)
+
+    def action_next_selected(self) -> None:
+        """Inspect the next frame retained by the current selection."""
+        self._inspect_selected_frame(1)
+
+    def action_open_inspected(self) -> None:
+        """Open the currently inspected frame in the default image viewer."""
+        if self.inspected_position is None:
+            return
+        self.post_message(
+            self.FrameOpenRequested(self.frames[self.inspected_position])
+        )
 
     def action_last_frame(self) -> None:
         """Scroll directly to the end of the analyzed timeline."""
@@ -272,9 +356,11 @@ class SharpnessChart(ScrollView):
     ) -> str:
         """Render a bar cell with eighth-row vertical precision."""
         subdivisions = cls.VERTICAL_SUBDIVISIONS
-        available_units = max(chart_height * subdivisions, 1)
+        variable_units = max((chart_height - 1) * subdivisions, 0)
         clamped = max(0.0, min(float(normalized), 1.0))
-        filled_units = max(1, int((clamped * available_units) + 0.5))
+        filled_units = subdivisions + int(
+            (clamped * variable_units) + 0.5
+        )
         row_from_bottom = chart_height - 1 - chart_y
         units_in_row = filled_units - (row_from_bottom * subdivisions)
         units_in_row = max(0, min(units_in_row, subdivisions))
@@ -466,7 +552,11 @@ class InputWithControls(Widget):
 
 class SelectionScreen(Screen):
     """Interactive selection screen with real-time preview."""
-    
+
+    # Below 56 rows the default spacing pushes the chart under the fold, so a
+    # tighter tier takes over (see the -vertical-compact rules in styles.py).
+    VERTICAL_BREAKPOINTS = [(0, "-vertical-compact"), (56, "-vertical-regular")]
+
     BINDINGS = [
         Binding("ctrl+c", "cancel", "Cancel"),
         Binding("escape", "cancel", "Cancel"),
@@ -516,8 +606,15 @@ class SelectionScreen(Screen):
         # Selection state
         self.current_method = "batched"
         self.current_parameters = {"batch_size": 5, "batch_buffer": 2}  # Default parameters for batched
-        self.preview_task = None  # For debouncing preview updates
+        self.preview_task = None  # Single-flight preview worker task
+        self._preview_generation = 0
+        self._pending_preview = None
+        self._final_processing_task = None
         self.selected_indices = set()  # Track which frames are selected
+        # While True the inline preview follows the first selected frame. It is
+        # switched off the moment the user clicks a chart bar to inspect a
+        # specific frame, so recomputed previews no longer override their choice.
+        self._auto_preview_active = True
         
         # Method definitions with default parameters - matching legacy application exactly
         self.method_definitions = {
@@ -557,12 +654,10 @@ class SelectionScreen(Screen):
         
         # Main container with all content
         with Container(id="main_content"):
-            # Title section - single line with left and right text
-            with Horizontal(id="title_section", classes="title_section"):
-                yield Static("Select Frames", classes="title_left")
-                yield Static(
-                    self._frame_count_summary(), classes="title_right"
-                )
+            # Inline source preview above the chart. Uses the original analyzed
+            # file and a true terminal raster protocol. On load it shows the
+            # first selected frame; clicking a chart bar swaps in that frame.
+            yield RasterImagePreview(id="frame_preview")
             
             # Sharpness chart - one horizontally scrollable column per frame
             yield SharpnessChart(
@@ -571,42 +666,44 @@ class SelectionScreen(Screen):
                 id="sharpness_chart"
             )
             
-            # Controls section - method and parameters side by side
-            with Horizontal(id="controls_section", classes="controls"):
-                # Method selection on the left
-                with Container(id="method_container", classes="control_group"):
-                    yield Label("Selection Method", classes="control_label")
-                    yield OptionSelect(
-                        options=[(info["name"], key) for key, info in self.method_definitions.items()],
-                        value="batched",
-                        id="method_select"
-                    )
-                    yield Static(self.method_definitions[self.current_method]["description"], 
-                               id="method_description", classes="description")
-                
-                # Parameters on the right
-                with Container(id="parameter_container", classes="control_group"):
-                    yield Label("Parameters", classes="control_label")
-                    with Container(id="parameter_inputs", classes="parameter_inputs"):
-                        # Initial parameters for batched method (default)
-                        yield Label("Frames per batch:", classes="param_label")
-                        yield InputWithControls(
-                            value="5",
-                            input_id="param_batched_batch_size",
-                            min_value=1,
-                            max_value=100,
-                            step=1,
-                            classes="param_input_with_controls"
+            # Controls are capped for readability while the data-heavy chart
+            # and raster preview continue to use the full terminal width.
+            with Container(classes="bounded-row"):
+                with Horizontal(id="controls_section", classes="controls"):
+                    # Method selection on the left
+                    with Container(id="method_container", classes="control_group"):
+                        yield Label("Selection Method", classes="control_label")
+                        yield OptionSelect(
+                            options=[(info["name"], key) for key, info in self.method_definitions.items()],
+                            value="batched",
+                            id="method_select"
                         )
-                        yield Label("Frames to skip between batches:", classes="param_label")
-                        yield InputWithControls(
-                            value="2",
-                            input_id="param_batched_batch_buffer",
-                            min_value=0,
-                            max_value=50,
-                            step=1,
-                            classes="param_input_with_controls"
-                        )
+                        yield Static(self.method_definitions[self.current_method]["description"],
+                                   id="method_description", classes="description")
+
+                    # Parameters on the right
+                    with Container(id="parameter_container", classes="control_group"):
+                        yield Label("Parameters", classes="control_label")
+                        with Container(id="parameter_inputs", classes="parameter_inputs"):
+                            # Initial parameters for batched method (default)
+                            yield Label("Frames per batch:", classes="param_label")
+                            yield InputWithControls(
+                                value="5",
+                                input_id="param_batched_batch_size",
+                                min_value=1,
+                                max_value=100,
+                                step=1,
+                                classes="param_input_with_controls"
+                            )
+                            yield Label("Frames to skip between batches:", classes="param_label")
+                            yield InputWithControls(
+                                value="2",
+                                input_id="param_batched_batch_buffer",
+                                min_value=0,
+                                max_value=50,
+                                step=1,
+                                classes="param_input_with_controls"
+                            )
             
             # Action buttons inside main content for better positioning
             with Horizontal(id="action_buttons", classes="action_buttons"):
@@ -618,34 +715,93 @@ class SelectionScreen(Screen):
     async def on_sharpness_chart_frame_inspect_requested(
         self, event: SharpnessChart.FrameInspectRequested
     ) -> None:
-        """Open a clicked frame in the platform's default image viewer."""
+        """Preview a clicked frame without launching external applications."""
+        # The user is now driving the preview manually, so stop auto-following
+        # the first selected frame when the selection is recomputed.
+        self._auto_preview_active = False
         frame = event.frame
         try:
-            await asyncio.to_thread(open_image_file, frame.path)
-        except (FileNotFoundError, OSError) as exc:
+            preview = self.query_one("#frame_preview", RasterImagePreview)
+            shown_inline = preview.show_frame(
+                frame.path,
+                frame_number=frame.index + 1,
+                score=frame.sharpness_score,
+            )
+            fallback_reason = (
+                "This terminal does not support inline raster graphics"
+            )
+        except FileNotFoundError as exc:
             self.notify(
                 str(exc),
                 title="Unable to inspect frame",
                 severity="error",
             )
             return
+        except (OSError, ValueError) as exc:
+            shown_inline = False
+            fallback_reason = (
+                f"The inline raster renderer could not show this frame ({exc})"
+            )
+
+        if shown_inline:
+            self._notify_inline_preview(frame)
+            return
 
         self.notify(
-            f"Frame {frame.index + 1:,} · sharpness {frame.sharpness_score:.2f}",
-            title="Opened image",
+            f"{fallback_reason}. Press O to open the original frame in your "
+            "default image viewer.",
+            title="Inline preview unavailable",
+            timeout=5,
+        )
+
+    async def on_sharpness_chart_frame_open_requested(
+        self, event: SharpnessChart.FrameOpenRequested
+    ) -> None:
+        """Open the currently inspected temporary frame in the default viewer."""
+        frame = event.frame
+        try:
+            await asyncio.to_thread(open_image_file, frame.path)
+        except (FileNotFoundError, OSError) as exc:
+            self.notify(
+                str(exc),
+                title="Unable to open frame",
+                severity="error",
+            )
+            return
+
+        self.notify(
+            f"Frame {frame.index + 1:,} opened in the default image viewer.",
+            title="Opened externally",
             timeout=3,
         )
 
-    def _frame_count_summary(self) -> str:
-        """Summarize analyzed and excluded inputs for the title row."""
-        analyzed_count = len(self.extraction_result.frames)
-        summary = f"Choose from {analyzed_count:,} analyzed frames"
-        analysis = self.extraction_result.metadata.get("sharpness_analysis", {})
-        unreadable_count = int(analysis.get("unreadable_count", 0) or 0)
-        if unreadable_count:
-            summary += f" | {unreadable_count:,} unreadable excluded"
-        return summary
-    
+    def _notify_inline_preview(self, frame: FrameData) -> None:
+        """Show at most three concurrent frame-navigation notifications."""
+        message = (
+            f"Frame {frame.index + 1:,} · "
+            f"sharpness {frame.sharpness_score:.2f}"
+        )
+        notify_limited = (
+            getattr(self.app, "notify_limited", None)
+            if self.is_mounted
+            else None
+        )
+        if callable(notify_limited):
+            notify_limited(
+                message,
+                channel="frame-preview",
+                limit=3,
+                title="Inline preview",
+                timeout=3,
+            )
+            return
+
+        self.notify(
+            message,
+            title="Inline preview",
+            timeout=3,
+        )
+
     def on_mount(self) -> None:
         """Initialize the screen when mounted."""
         # Parameter inputs are already created in compose() with correct initial values
@@ -744,11 +900,32 @@ class SelectionScreen(Screen):
             self.action_start_over()
     
     def action_cancel(self) -> None:
-        """Cancel selection and return to previous screen."""
+        """Return unless a final save is already in progress."""
+        if (
+            self._final_processing_task is not None
+            and not self._final_processing_task.done()
+        ):
+            self.notify(
+                "Saving is already in progress. Please wait for it to finish.",
+                title="Save in progress",
+                timeout=3,
+            )
+            return
         self.app.pop_screen()
     
     def action_confirm(self) -> None:
-        """Confirm selection and proceed with saving."""
+        """Confirm selection once the latest preview is ready."""
+        if (
+            self._final_processing_task is not None
+            and not self._final_processing_task.done()
+        ):
+            return
+        try:
+            confirm_button = self.query_one("#confirm_button", Button)
+        except NoMatches:
+            return
+        if confirm_button.disabled or self.selected_count <= 0:
+            return
         self._start_final_processing()
 
     def action_select_current_option(self) -> None:
@@ -761,12 +938,13 @@ class SelectionScreen(Screen):
         if self.processor and hasattr(self.processor, 'cleanup_temp_directory'):
             self.processor.cleanup_temp_directory()
         
-        # Reset configuration screen to first step
-        # The configuration screen should be at index 0 in the screen stack  
-        if len(self.app.screen_stack) >= 3:  # Config, Processing, Selection
-            config_screen = self.app.screen_stack[0]
-            if hasattr(config_screen, 'reset_to_first_step'):
-                config_screen.reset_to_first_step()
+        # Reset the configuration screen to the first step. Textual keeps a
+        # default screen at the bottom of the stack, so locate the form by
+        # capability rather than by index.
+        for screen in self.app.screen_stack:
+            if hasattr(screen, 'reset_to_first_step'):
+                screen.reset_to_first_step()
+                break
         
         # Pop both selection and processing screens to return to configuration at step 1
         self.app.pop_screen()  # Pop selection screen
@@ -792,7 +970,7 @@ Choose how to select the best frames from your analyzed video/images.
 1. **Choose a method** from the dropdown
 2. **Adjust parameters** as needed 
 3. **Watch the count update** in real-time as you change settings
-4. **Click a chart bar** to inspect that image in your default viewer
+4. **Click a chart bar** to inspect it, then press **O** to open it externally
 5. **Press "Process"** when you're happy with the selection
 
 The preview count updates instantly as you make changes, so you can experiment freely!
@@ -885,57 +1063,89 @@ The preview count updates instantly as you make changes, so you can experiment f
             self.app.log.error(f"Error updating parameter inputs: {e}")
     
     def _update_preview_async(self) -> None:
-        """Update preview with debouncing to avoid too frequent updates."""
-        # Cancel previous preview task if still running
-        if self.preview_task and not self.preview_task.done():
-            self.preview_task.cancel()
-        
-        # Schedule new preview update
-        self.preview_task = asyncio.create_task(self._update_preview_debounced())
-    
-    async def _update_preview_debounced(self) -> None:
-        """Update preview with small delay to debounce rapid changes."""
+        """Coalesce preview requests behind one selector thread at a time."""
+        self._preview_generation += 1
+        self._pending_preview = (
+            self._preview_generation,
+            self.current_method,
+            dict(self.current_parameters),
+        )
+
         try:
-            # Small delay to debounce rapid parameter changes
-            await asyncio.sleep(0.1)  # 100ms debounce
-            
-            # Get preview from processor
-            count = self.processor.preview_selection(self.current_method, **self.current_parameters)
-            
-            # Update UI elements
-            self._update_preview_display(count)
-            
-            # Post message for other components that might be listening
-            await self.post_message(self.SelectionPreview(count, self.current_method, **self.current_parameters))
-            
-        except asyncio.CancelledError:
-            # Task was cancelled, ignore
+            self.query_one("#confirm_button", Button).disabled = True
+        except NoMatches:
             pass
-        except Exception as e:
-            self.app.log.error(f"Error updating preview: {e}")
-    
-    def _update_preview_display(self, count: int) -> None:
-        """Update the preview display with new count in the button."""
-        self.selected_count = count
-        
-        # Update selected indices for the chart
-        # Get which frames would be selected with current settings
+
+        if self.preview_task is None or self.preview_task.done():
+            self.preview_task = asyncio.create_task(self._run_preview_worker())
+
+    async def _run_preview_worker(self) -> None:
+        """Process only the newest pending preview without overlapping calls."""
         try:
-            # Use the actual selection method to get the selected frames
-            selected_frames = self.processor.selector.select_frames(
+            while self._pending_preview is not None:
+                await asyncio.sleep(0.1)
+                request = self._pending_preview
+                self._pending_preview = None
+                if request is None:
+                    continue
+                await self._compute_preview(*request)
+        except asyncio.CancelledError:
+            pass
+        finally:
+            if asyncio.current_task() is self.preview_task:
+                self.preview_task = None
+
+    async def _update_preview_debounced(
+        self,
+        generation: int,
+        method: str,
+        parameters: Dict[str, Any],
+    ) -> None:
+        """Compatibility helper for one explicitly debounced preview."""
+        await asyncio.sleep(0.1)
+        await self._compute_preview(generation, method, parameters)
+
+    async def _compute_preview(
+        self,
+        generation: int,
+        method: str,
+        parameters: Dict[str, Any],
+    ) -> None:
+        """Compute one selection off-thread and ignore stale completions."""
+        try:
+            selected_frames = await asyncio.to_thread(
+                self.processor.selector.select_frames,
                 self.extraction_result.frames,
-                self.current_method,
-                **self.current_parameters
+                method,
+                **parameters,
             )
-            self.selected_indices = {frame.index for frame in selected_frames}
-            
-            # Update the chart
-            chart = self.query_one("#sharpness_chart", SharpnessChart)
-            chart.update_selection(self.selected_indices)
+
+            if generation != self._preview_generation or not self.is_mounted:
+                return
+
+            selected_indices = {frame.index for frame in selected_frames}
+            count = len(selected_frames)
+            self._update_preview_display(count, selected_indices)
+            await self.post_message(
+                self.SelectionPreview(count, method, **parameters)
+            )
+        except asyncio.CancelledError:
+            raise
         except Exception as e:
-            self.app.log.error(f"Error updating chart selection: {e}")
-        
-        # Update the action button to show what will happen
+            if generation == self._preview_generation:
+                self.app.log.error(f"Error updating preview: {e}")
+
+    def _update_preview_display(
+        self, count: int, selected_indices: set[int]
+    ) -> None:
+        """Update the chart and action button from one selection result."""
+        self.selected_count = count
+        self.selected_indices = selected_indices
+        self.query_one("#sharpness_chart", SharpnessChart).update_selection(
+            selected_indices
+        )
+        self._refresh_auto_preview(selected_indices)
+
         confirm_btn = self.query_one("#confirm_button", Button)
         if count > 0:
             confirm_btn.label = f"Save {count:,} Images"
@@ -943,32 +1153,103 @@ The preview count updates instantly as you make changes, so you can experiment f
         else:
             confirm_btn.label = "No Images Selected"
             confirm_btn.disabled = True
-    
+
+    def _refresh_auto_preview(self, selected_indices: set[int]) -> None:
+        """Show the first selected frame until the user inspects one manually."""
+        if not self._auto_preview_active:
+            return
+
+        first_selected = next(
+            (
+                frame
+                for frame in self.extraction_result.frames
+                if frame.index in selected_indices
+            ),
+            None,
+        )
+        if first_selected is None:
+            return
+
+        try:
+            preview = self.query_one("#frame_preview", RasterImagePreview)
+        except NoMatches:
+            return
+        if not preview.raster_supported:
+            return
+
+        try:
+            preview.show_frame(
+                first_selected.path,
+                frame_number=first_selected.index + 1,
+                score=first_selected.sharpness_score,
+            )
+        except (FileNotFoundError, OSError, ValueError):
+            # A missing or unreadable first frame must never break the preview
+            # refresh; the user can still inspect other frames explicitly.
+            pass
+
+    def on_unmount(self) -> None:
+        """Invalidate preview work before the screen is removed."""
+        self._preview_generation += 1
+        self._pending_preview = None
+        if self.preview_task and not self.preview_task.done():
+            self.preview_task.cancel()
+
     def _start_final_processing(self) -> None:
-        """Start the final processing phase (selection and saving)."""
-        # Disable UI during processing
+        """Start at most one final selection and saving operation."""
+        if (
+            self._final_processing_task is not None
+            and not self._final_processing_task.done()
+        ):
+            return
+
+        self._preview_generation += 1
+        self._pending_preview = None
+        if self.preview_task and not self.preview_task.done():
+            self.preview_task.cancel()
+
         self.query_one("#confirm_button", Button).disabled = True
         self.query_one("#method_select", Select).disabled = True
-        
-        # Create final config without mixing in selection parameters
-        # The parameters will be passed separately to complete_selection
+
+        # Drop any inline raster preview before saving: completing the save
+        # removes the extraction temp directory, and a stale frame path would
+        # crash Textual's render loop on the next repaint.
+        try:
+            self.query_one("#frame_preview", RasterImagePreview).clear()
+        except NoMatches:
+            pass
+
+        method = self.current_method
+        parameters = dict(self.current_parameters)
         final_config = self.config.copy()
-        final_config['selection_method'] = self.current_method
-        
-        # Start processing in background
-        asyncio.create_task(self._process_final_selection(final_config))
-    
-    async def _process_final_selection(self, final_config: Dict[str, Any]) -> None:
+        final_config['selection_method'] = method
+
+        self._final_processing_task = asyncio.create_task(
+            self._process_final_selection(
+                final_config,
+                method=method,
+                parameters=parameters,
+            )
+        )
+
+    async def _process_final_selection(
+        self,
+        final_config: Dict[str, Any],
+        *,
+        method: Optional[str] = None,
+        parameters: Optional[Dict[str, Any]] = None,
+    ) -> None:
         """Process the final selection and saving."""
         selected_count = self.selected_count
         processing_label = None
-        
+
         try:
-            # Show processing indicator
             processing_label = await self._show_processing_indicator()
-            
-            # Run the final selection in background thread
-            success = await self._execute_selection_in_background(final_config)
+            success = await self._execute_selection_in_background(
+                final_config,
+                method=method,
+                parameters=parameters,
+            )
             
             if success:
                 await self._handle_selection_success(processing_label, selected_count, final_config)
@@ -978,24 +1259,35 @@ The preview count updates instantly as you make changes, so you can experiment f
         except Exception as e:
             self.app.log.error(f"Error during final processing: {e}")
             await self._handle_selection_error(processing_label, str(e))
-    
+        finally:
+            if asyncio.current_task() is self._final_processing_task:
+                self._final_processing_task = None
+
     async def _show_processing_indicator(self) -> Label:
         """Show the processing indicator and return the label widget."""
         processing_label = Label("🔄 Processing selection...", classes="processing_indicator")
         await self.query_one("#main_content").mount(processing_label)
         return processing_label
     
-    async def _execute_selection_in_background(self, final_config: Dict[str, Any]) -> bool:
+    async def _execute_selection_in_background(
+        self,
+        final_config: Dict[str, Any],
+        *,
+        method: Optional[str] = None,
+        parameters: Optional[Dict[str, Any]] = None,
+    ) -> bool:
         """Execute the selection process in a background thread."""
-        # Run the final selection (this is CPU intensive, so we run it in a thread)
-        # Note: run_in_executor doesn't support keyword arguments, so we use a lambda
-        return await asyncio.get_event_loop().run_in_executor(
-            None, 
-            lambda: self.processor.complete_selection(
-                self.current_method,
-                final_config,
-                **self.current_parameters
-            )
+        selected_method = method or self.current_method
+        selected_parameters = (
+            dict(parameters)
+            if parameters is not None
+            else dict(self.current_parameters)
+        )
+        return await asyncio.to_thread(
+            self.processor.complete_selection,
+            selected_method,
+            final_config,
+            **selected_parameters,
         )
     
     async def _handle_selection_success(self, processing_label: Label, selected_count: int, final_config: Dict[str, Any]) -> None:
@@ -1033,17 +1325,20 @@ The preview count updates instantly as you make changes, so you can experiment f
                 pass
         self._re_enable_ui()
     
-    def _create_success_container(self, selected_count: int, final_config: Dict[str, Any]) -> Horizontal:
+    def _create_success_container(self, selected_count: int, final_config: Dict[str, Any]) -> Container:
         """Create the success message container."""
-        return Horizontal(
-            Container(
-                Static("✅ Images saved successfully!", classes="success_message"),
-                Static(f"Saved {selected_count} frames to {final_config['output_dir']}", classes="success_details"),
-                classes="success_text_container"
+        return Container(
+            Horizontal(
+                Container(
+                    Static("✅ Images saved successfully!", classes="success_message"),
+                    Static(f"Saved {selected_count} frames to {final_config['output_dir']}", classes="success_details"),
+                    classes="success_text_container"
+                ),
+                Button("Start Over", id="start_over_button", variant="primary"),
+                id="success_container",
+                classes="success_container"
             ),
-            Button("Start Over", id="start_over_button", variant="primary"),
-            id="success_container",
-            classes="success_container"
+            classes="bounded-row success-row",
         )
     
     def _re_enable_ui(self) -> None:

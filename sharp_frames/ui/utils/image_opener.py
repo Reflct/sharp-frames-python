@@ -25,9 +25,18 @@ def open_image_file(path: str, system_name: Optional[str] = None) -> None:
         "xdg-open",
         str(image_path),
     ]
-    subprocess.Popen(
-        command,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
+    try:
+        result = subprocess.run(
+            command,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=10,
+            start_new_session=True,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise OSError(f"Unable to launch the default image viewer: {exc}") from exc
+    if result.returncode != 0:
+        detail = result.stderr.strip() or f"exit code {result.returncode}"
+        raise OSError(f"Unable to launch the default image viewer: {detail}")

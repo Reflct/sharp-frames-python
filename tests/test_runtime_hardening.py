@@ -11,6 +11,12 @@ from unittest.mock import Mock, patch
 import pytest
 
 from sharp_frames.models.frame_data import ExtractionResult, FrameData
+from sharp_frames.processing.colorspace import (
+    ColorMatrix,
+    ColorPrimaries,
+    TransferFunction,
+    VideoColorInfo,
+)
 from sharp_frames.processing.frame_extractor import FrameExtractor
 from sharp_frames.processing.tui_processor import TUIProcessor
 from sharp_frames.sharp_frames_processor import SharpFrames
@@ -92,6 +98,40 @@ class StubbornFakeProcess:
 def _create_frames(directory: Path, count: int) -> None:
     for index in range(1, count + 1):
         (directory / f"frame_{index:05d}.jpg").touch()
+
+
+def test_hdr_filters_drop_frames_and_resize_before_float_tone_mapping():
+    extractor = FrameExtractor()
+    color_info = VideoColorInfo(
+        color_primaries=ColorPrimaries.BT2020,
+        transfer_function=TransferFunction.PQ,
+        color_matrix=ColorMatrix.BT2020_NCL,
+        is_hdr=True,
+    )
+
+    with patch(
+        "sharp_frames.processing.colorspace.is_zscale_available",
+        return_value=True,
+    ):
+        filters = extractor._build_video_filters(1, 640, color_info)
+
+    assert filters[0] == "fps=1"
+    assert "w=640:h=-2:f=lanczos" in filters[1].split(",", 1)[0]
+    assert "format=gbrpf32le" in filters[1]
+    assert not any(filter_.startswith("scale=") for filter_ in filters)
+
+
+def test_cancel_processing_only_signals_the_worker():
+    extractor = FrameExtractor()
+    process = RunningFakeProcess()
+    extractor._active_process = process
+
+    with patch.object(extractor, "_terminate_process") as terminate:
+        extractor.cancel_processing()
+
+    assert extractor._cancellation_event.is_set()
+    terminate.assert_not_called()
+    assert process.returncode is None
 
 
 def test_ffmpeg_nonzero_exit_rejects_partial_output(tmp_path):

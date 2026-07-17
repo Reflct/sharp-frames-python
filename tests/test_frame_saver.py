@@ -15,6 +15,13 @@ def _write_image(path: Path, color: tuple[int, int, int]) -> None:
     assert cv2.imwrite(str(path), image)
 
 
+def _write_rgba_image(path: Path) -> None:
+    image = np.zeros((12, 16, 4), dtype=np.uint8)
+    image[..., :3] = (10, 40, 200)
+    image[..., 3] = np.linspace(0, 255, 16, dtype=np.uint8)
+    assert cv2.imwrite(str(path), image)
+
+
 def _config(output_dir: Path, **overrides):
     config = {
         "input_type": "directory",
@@ -104,6 +111,62 @@ def test_directory_image_is_transcoded_to_requested_format(tmp_path):
     assert metadata["total_saved"] == 1
     assert metadata["total_failed"] == 0
     assert metadata["selected_frames"][0]["output_filename"] == "source.jpg"
+
+
+def test_transcoding_to_png_preserves_alpha(tmp_path):
+    source = tmp_path / "source.webp"
+    output_dir = tmp_path / "output"
+    _write_rgba_image(source)
+
+    result = FrameSaver(show_progress=False).save_frames(
+        [FrameData(str(source), 0, 12.5, output_name="source")],
+        _config(output_dir, output_format="png"),
+    )
+
+    output = cv2.imread(
+        str(output_dir / "source.png"), cv2.IMREAD_UNCHANGED
+    )
+    assert result is True
+    assert output is not None
+    assert output.shape[2] == 4
+    assert output[..., 3].min() == 0
+    assert output[..., 3].max() == 255
+
+
+def test_resizing_png_preserves_alpha(tmp_path):
+    source = tmp_path / "source.png"
+    output_dir = tmp_path / "output"
+    _write_rgba_image(source)
+
+    result = FrameSaver(show_progress=False).save_frames(
+        [FrameData(str(source), 0, 12.5, output_name="source")],
+        _config(output_dir, output_format="png", width=8),
+    )
+
+    output = cv2.imread(
+        str(output_dir / "source.png"), cv2.IMREAD_UNCHANGED
+    )
+    assert result is True
+    assert output is not None
+    assert output.shape == (6, 8, 4)
+    assert output[..., 3].min() < output[..., 3].max()
+
+
+def test_jpeg_output_composites_transparency_on_white(tmp_path):
+    source = tmp_path / "source.png"
+    output_dir = tmp_path / "output"
+    image = np.zeros((12, 16, 4), dtype=np.uint8)
+    assert cv2.imwrite(str(source), image)
+
+    result = FrameSaver(show_progress=False).save_frames(
+        [FrameData(str(source), 0, 12.5, output_name="source")],
+        _config(output_dir, output_format="jpg"),
+    )
+
+    output = cv2.imread(str(output_dir / "source.jpg"))
+    assert result is True
+    assert output is not None
+    assert output.mean() > 245
 
 
 def test_duplicate_directory_stems_get_deterministic_unique_names(tmp_path):

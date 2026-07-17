@@ -14,6 +14,9 @@ SUPPORTED_VIDEO_EXTENSIONS = frozenset({
     '.3g2', '.3gp', '.avi', '.flv', '.m2ts', '.m4v', '.mkv', '.mov',
     '.mp4', '.mpeg', '.mpg', '.mts', '.ogv', '.ts', '.vob', '.webm', '.wmv',
 })
+AMBIGUOUS_VIDEO_EXTENSIONS = frozenset({'.ts'})
+_MPEG_TS_PACKET_SIZES = (188, 192, 204)
+_MPEG_TS_REQUIRED_SYNC_BYTES = 4
 
 SUPPORTED_IMAGE_EXTENSIONS = frozenset({
     '.bmp', '.jpeg', '.jpg', '.pbm', '.pgm', '.png', '.ppm', '.tif',
@@ -58,26 +61,61 @@ def get_ffmpeg_installation_hint(system_name: Optional[str] = None) -> str:
     )
 
 
+def has_mpeg_ts_signature(path: str) -> bool:
+    """Return whether a file begins with a recognizable MPEG-TS packet layout."""
+    read_size = max(_MPEG_TS_PACKET_SIZES) * (_MPEG_TS_REQUIRED_SYNC_BYTES + 1)
+    try:
+        with open(path, "rb") as stream:
+            data = stream.read(read_size)
+    except (OSError, PermissionError):
+        return False
+
+    for packet_size in _MPEG_TS_PACKET_SIZES:
+        required_span = packet_size * (_MPEG_TS_REQUIRED_SYNC_BYTES - 1)
+        if len(data) <= required_span:
+            continue
+        max_offset = min(packet_size, len(data) - required_span)
+        for offset in range(max_offset):
+            if all(
+                data[offset + packet_size * packet_index] == 0x47
+                for packet_index in range(_MPEG_TS_REQUIRED_SYNC_BYTES)
+            ):
+                return True
+    return False
+
+
+def is_video_file(path: str) -> bool:
+    """Return whether an existing file is a supported video candidate."""
+    if not os.path.isfile(path):
+        return False
+    extension = os.path.splitext(os.fspath(path))[1].lower()
+    if extension not in SUPPORTED_VIDEO_EXTENSIONS:
+        return False
+    if extension in AMBIGUOUS_VIDEO_EXTENSIONS:
+        return has_mpeg_ts_signature(path)
+    return True
+
+
 def get_video_files_in_directory(directory_path: str) -> List[str]:
     """Get all video files in a directory."""
     video_files = []
     if not os.path.isdir(directory_path):
         return video_files
-    
+
     for filename in os.listdir(directory_path):
         file_path = os.path.join(directory_path, filename)
-        if os.path.isfile(file_path):
-            _, ext = os.path.splitext(filename.lower())
-            if ext in SUPPORTED_VIDEO_EXTENSIONS:
-                video_files.append(file_path)
-    
+        if is_video_file(file_path):
+            video_files.append(file_path)
+
     return sorted(video_files, key=natural_path_key)
 
 
 def detect_input_type(input_path: str) -> str:
     """Detect the input type based on the path contents."""
     if os.path.isfile(input_path):
-        return "video"
+        if is_video_file(input_path):
+            return "video"
+        raise ValueError(f"Input file is not a supported video: {input_path}")
     elif os.path.isdir(input_path):
         # Check what's in the directory
         video_files = get_video_files_in_directory(input_path)

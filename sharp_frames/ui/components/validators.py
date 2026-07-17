@@ -9,7 +9,13 @@ from pathlib import Path
 from textual.widgets import Input
 from textual.validation import ValidationResult, Validator
 from ..utils.path_sanitizer import PathSanitizer
-from ...video_utils import SUPPORTED_IMAGE_EXTENSIONS, SUPPORTED_VIDEO_EXTENSIONS
+from ...video_utils import (
+    AMBIGUOUS_VIDEO_EXTENSIONS,
+    SUPPORTED_IMAGE_EXTENSIONS,
+    SUPPORTED_VIDEO_EXTENSIONS,
+    get_video_files_in_directory,
+    is_video_file,
+)
 
 
 class PathValidator(Validator):
@@ -104,6 +110,14 @@ class VideoFileValidator(Validator):
                     return self.failure(f"Video file is very small ({file_size} bytes) - may be corrupted")
             except (OSError, PermissionError):
                 return self.failure("Cannot access video file - check permissions")
+
+            if (
+                path.suffix.lower() in AMBIGUOUS_VIDEO_EXTENSIONS
+                and not is_video_file(str(path))
+            ):
+                return self.failure(
+                    "The .ts file does not contain a recognizable MPEG transport stream"
+                )
         
         return self.success()
     
@@ -162,18 +176,11 @@ class VideoDirectoryValidator(Validator):
         return self.success()
     
     def _find_video_files(self, directory: Path) -> List[Path]:
-        """Find video files in the given directory."""
-        video_extensions = VideoFileValidator.SUPPORTED_VIDEO_EXTENSIONS
-        video_files = []
-        
-        try:
-            for file_path in directory.iterdir():
-                if file_path.is_file() and file_path.suffix.lower() in video_extensions:
-                    video_files.append(file_path)
-        except (OSError, PermissionError):
-            pass
-        
-        return video_files
+        """Find video files using the shared media classifier."""
+        return [
+            Path(path)
+            for path in get_video_files_in_directory(str(directory))
+        ]
     
     def get_sanitized_value(self) -> str:
         """Get the last sanitized path value."""

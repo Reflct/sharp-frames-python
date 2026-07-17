@@ -149,7 +149,7 @@ def test_cancel_and_help_delegate_to_the_app():
         form.action_cancel()
         form.action_help()
 
-    app.pop_screen.assert_called_once_with()
+    app.exit.assert_called_once_with(result="cancelled")
     help_call = app.push_screen.call_args
     assert help_call.args[0] == "help"
     assert "Sharp Frames Configuration Help" in help_call.args[1]

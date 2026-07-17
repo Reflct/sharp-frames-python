@@ -3,12 +3,13 @@ Configuration screen for Sharp Frames UI.
 Removes selection method configuration (moved to post-extraction SelectionScreen).
 """
 
+from functools import partial
+
+from rich.text import Text
 from textual.app import ComposeResult
 from textual.containers import Container, Horizontal
-from textual.widgets import (
-    Header, Footer, Button, Input, Select, RadioSet,
-    Checkbox, Label, Static
-)
+from textual.css.query import NoMatches
+from textual.widgets import Header, Footer, Button, Input, Label, Static
 from textual.screen import Screen
 from textual.binding import Binding
 
@@ -27,6 +28,121 @@ from ..components.step_handlers import (
     ConfirmStepHandler
 )
 from ..components.validators import ValidationHelpers
+
+
+class AsciiTitleShimmer(Static):
+    """Run a single diagonal colour shimmer across the full ASCII title."""
+
+    INITIAL_DELAY_SECONDS = 0.16
+    FRAME_INTERVAL_SECONDS = 0.045
+    _ROW_OFFSET = 2
+    _POSITION_STEP = 5
+    _OUTER_BAND_WIDTH = 3
+    _EDGE_COLOR = "#55A9FF"
+    _MID_COLOR = "#8DCCFF"
+    _CORE_COLOR = "#D6EEFF"
+
+    def __init__(self, title_markup: str) -> None:
+        base_text = Text.from_markup(title_markup)
+        title_rows = self._title_rows(base_text.plain)
+        self.frames = self._build_frames(
+            base_text,
+            title_rows,
+        )
+        super().__init__(self.frames[0], id="ascii-title", classes="title")
+
+    @staticmethod
+    def _title_rows(plain_title: str) -> list[tuple[int, str]]:
+        """Return global offsets and visible content for the six logo rows."""
+        rows: list[tuple[int, str]] = []
+        offset = 0
+        for line in plain_title.splitlines(keepends=True):
+            visible_line = line.rstrip("\r\n")
+            if visible_line.strip():
+                rows.append((offset, visible_line))
+            offset += len(line)
+        return rows
+
+    @classmethod
+    def _build_frames(
+        cls,
+        base_text: Text,
+        title_rows: list[tuple[int, str]],
+    ) -> tuple[Text, ...]:
+        """Build fixed-layout colour frames for one diagonal shimmer pass."""
+        title_width = max(len(row) for _, row in title_rows)
+        final_position = (
+            title_width - 1
+            + (len(title_rows) - 1) * cls._ROW_OFFSET
+            + cls._OUTER_BAND_WIDTH
+        )
+        positions = range(
+            -cls._OUTER_BAND_WIDTH,
+            final_position + cls._POSITION_STEP,
+            cls._POSITION_STEP,
+        )
+        shimmer_frames = tuple(
+            cls._build_shimmer_frame(
+                base_text,
+                title_rows,
+                position,
+            )
+            for position in positions
+        )
+        return (base_text.copy(), *shimmer_frames, base_text.copy())
+
+    @classmethod
+    def _build_shimmer_frame(
+        cls,
+        base_text: Text,
+        title_rows: list[tuple[int, str]],
+        position: int,
+    ) -> Text:
+        """Overlay one three-tone diagonal band without changing any glyphs."""
+        frame = base_text.copy()
+        for row_index, (row_offset, row) in enumerate(title_rows):
+            for column in range(len(row)):
+                if row[column].isspace():
+                    continue
+                diagonal_position = column + row_index * cls._ROW_OFFSET
+                distance = abs(diagonal_position - position)
+                color = cls._color_for_distance(distance)
+                if color is not None:
+                    character_offset = row_offset + column
+                    frame.stylize(
+                        color,
+                        character_offset,
+                        character_offset + 1,
+                    )
+        return frame
+
+    @classmethod
+    def _color_for_distance(cls, distance: int) -> str | None:
+        """Return a soft edge, mid tone, or pale core for the shimmer band."""
+        if distance == 0:
+            return cls._CORE_COLOR
+        if distance == 1:
+            return cls._MID_COLOR
+        if distance <= cls._OUTER_BAND_WIDTH:
+            return cls._EDGE_COLOR
+        return None
+
+    def on_mount(self) -> None:
+        """Schedule one pass, respecting Textual's reduced-animation setting."""
+        if self.app.animation_level == "none":
+            return
+
+        for frame_index in range(1, len(self.frames)):
+            self.set_timer(
+                self.INITIAL_DELAY_SECONDS
+                + (frame_index - 1) * self.FRAME_INTERVAL_SECONDS,
+                partial(self._show_frame, frame_index),
+                name=f"title-shimmer-{frame_index}",
+            )
+
+    def _show_frame(self, frame_index: int) -> None:
+        """Swap colour spans without recalculating the stable title layout."""
+        self.update(self.frames[frame_index], layout=False)
 
 
 class ConfigurationForm(Screen):
@@ -97,18 +213,22 @@ class ConfigurationForm(Screen):
 ███████[#2575E6]║[/#2575E6]██[#2575E6]║[/#2575E6]  ██[#2575E6]║[/#2575E6]██[#2575E6]║[/#2575E6]  ██[#2575E6]║[/#2575E6]██[#2575E6]║[/#2575E6]  ██[#2575E6]║[/#2575E6]██[#2575E6]║[/#2575E6]         ██[#2575E6]║[/#2575E6]     ██[#2575E6]║[/#2575E6]  ██[#2575E6]║[/#2575E6]██[#2575E6]║[/#2575E6]  ██[#2575E6]║[/#2575E6]██[#2575E6]║[/#2575E6] [#2575E6]╚═╝[/#2575E6] ██[#2575E6]║[/#2575E6]███████[#2575E6]╗[/#2575E6]███████[#2575E6]║[/#2575E6]
 [#2575E6]╚══════╝╚═╝[/#2575E6]  [#2575E6]╚═╝╚═╝[/#2575E6]  [#2575E6]╚═╝╚═╝[/#2575E6]  [#2575E6]╚═╝╚═╝[/#2575E6]         [#2575E6]╚═╝[/#2575E6]     [#2575E6]╚═╝[/#2575E6]  [#2575E6]╚═╝╚═╝[/#2575E6]  [#2575E6]╚═╝╚═╝[/#2575E6]     [#2575E6]╚═╝╚══════╝╚══════╝[/#2575E6]
         """
-        yield Static(ascii_title, classes="title")
-        yield Static("", id="step-info", classes="step-info")
-        yield Static("", id="step-description", classes="step-description")
-        
-        with Container(id="main-container"):
-            yield Container(id="step-container")
-        
-        with Horizontal(classes="buttons"):
-            yield Button("Back", variant="default", id="back-btn", disabled=True)
-            yield Button("Next", variant="primary", id="next-btn")
-            yield Button("Cancel", variant="default", id="cancel-btn")
-        
+        # The whole form block (logo, step info, inputs, and its buttons) is
+        # vertically centred as one unit, with the CTAs sitting under the
+        # controls rather than docked to the bottom of the screen.
+        with Container(id="form-sequence"):
+            with Container(id="main-container"):
+                yield AsciiTitleShimmer(ascii_title)
+                yield Static("", id="step-info", classes="step-info")
+                yield Static("", id="step-description", classes="step-description")
+                yield Container(id="step-container")
+                with Horizontal(classes="buttons"):
+                    yield Button(
+                        "Back", variant="default", id="back-btn", disabled=True
+                    )
+                    yield Button("Next", variant="primary", id="next-btn")
+                    yield Button("Cancel", variant="default", id="cancel-btn")
+
         yield Footer()
     
     def on_mount(self) -> None:
@@ -289,7 +409,7 @@ class ConfigurationForm(Screen):
         try:
             error_widget = self.query_one(".error-message")
             error_widget.remove()
-        except:
+        except NoMatches:
             pass  # No error message to remove
     
     def _show_error(self, message: str) -> None:
@@ -311,7 +431,7 @@ class ConfigurationForm(Screen):
     
     def action_cancel(self) -> None:
         """Cancel the configuration and exit - same as legacy."""
-        self.app.pop_screen()
+        self.app.exit(result="cancelled")
     
     def action_process(self) -> None:
         """Start processing with the collected configuration - transition to processing."""

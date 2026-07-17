@@ -91,26 +91,15 @@ class MinimalProgressSharpFrames(SharpFrames):
     
     def _build_ffmpeg_command(self, output_pattern: str, color_info=None) -> List[str]:
         """Build the FFmpeg command for frame extraction with color space conversion."""
-        from .colorspace import build_colorspace_filter
+        from .frame_extractor import FrameExtractor
 
-        # Build the video filters string - order matters!
-        vf_filters = []
-
-        # 1. Color space conversion FIRST (before any other processing)
-        if color_info is not None:
-            colorspace_filter = build_colorspace_filter(color_info)
-            if colorspace_filter:
-                vf_filters.append(colorspace_filter)
-
-        # 2. FPS filter
-        vf_filters.append(f"fps={self.fps}")
-
-        # 3. Scaling filter (after color conversion)
-        if self.width > 0:
-            vf_filters.append(f"scale={self.width}:-2")  # -2 maintains aspect ratio and ensures even height
-
-        # Join all filters with commas
-        vf_string = ",".join(vf_filters)
+        vf_string = ",".join(
+            FrameExtractor._build_video_filters(
+                self.fps,
+                self.width,
+                color_info,
+            )
+        )
 
         command = [
             "ffmpeg",

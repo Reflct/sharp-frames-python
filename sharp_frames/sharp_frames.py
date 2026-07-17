@@ -7,7 +7,11 @@ from typing import List, Dict, Any, Tuple, Set
 from .sharp_frames_processor import SharpFrames, ImageProcessingError
 
 # Import video directory utilities
-from .video_utils import get_video_files_in_directory, detect_input_type
+from .video_utils import (
+    detect_input_type,
+    get_video_files_in_directory,
+    is_video_file,
+)
 
 # Helper functions for interactive mode
 def get_valid_file_path(prompt: str, must_exist: bool = True) -> str:
@@ -27,7 +31,12 @@ def get_valid_file_path(prompt: str, must_exist: bool = True) -> str:
         if must_exist and not os.path.isfile(path):
             print(f"Error: File '{path}' not found. Please enter a valid file path.")
             continue
-            
+        if must_exist and not is_video_file(path):
+            print(
+                f"Error: File '{path}' is not a recognizable supported video."
+            )
+            continue
+
         return path
 
 def get_valid_dir_path(prompt: str, create_if_missing: bool = True, check_emptiness: bool = True) -> str:
@@ -210,8 +219,12 @@ def main():
         print(f"Error: Input path not found: {args.input_path}")
         return 1
 
-    input_type = detect_input_type(args.input_path)
-    
+    try:
+        input_type = detect_input_type(args.input_path)
+    except ValueError as exc:
+        print(f"Error: {exc}")
+        return 1
+
     # Handle input type specific logic
     if input_type == "directory":
         print("Input path is a directory. Processing images.")

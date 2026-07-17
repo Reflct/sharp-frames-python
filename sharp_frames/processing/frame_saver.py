@@ -8,16 +8,10 @@ import shutil
 from contextlib import nullcontext
 from typing import Any, Dict, List, Optional
 
-import cv2
 from tqdm import tqdm
 
 from ..models.frame_data import FrameData
-
-
-class ImageProcessingError(Exception):
-    """Custom exception for image processing errors."""
-
-    pass
+from ..image_output import image_needs_processing, transcode_image
 
 
 class FrameSaver:
@@ -235,20 +229,10 @@ class FrameSaver:
             dst_path = os.path.normpath(dst_path)
             
             # Video frames already have the requested encoding and size from extraction.
-            if input_type == 'directory' and self._directory_image_needs_processing(
+            if input_type == 'directory' and image_needs_processing(
                 src_path, dst_path, width
             ):
-                img = cv2.imread(src_path)
-                if img is None:
-                    raise ImageProcessingError(f"Failed to read image: {src_path}")
-
-                if width > 0:
-                    img = self._resize_image(img, width)
-
-                if not cv2.imwrite(dst_path, img):
-                    raise ImageProcessingError(
-                        f"Failed to encode image as {os.path.splitext(dst_path)[1]}"
-                    )
+                transcode_image(src_path, dst_path, width)
                 return True
 
             shutil.copy2(src_path, dst_path)
@@ -258,30 +242,6 @@ class FrameSaver:
             print(f"Error saving {src_path} to {dst_path}: {e}")
             return False
 
-    def _directory_image_needs_processing(
-        self, src_path: str, dst_path: str, width: int
-    ) -> bool:
-        """Return whether an image must be decoded for resize or format conversion."""
-        if width > 0:
-            return True
-
-        source_format = self._canonical_image_format(src_path)
-        destination_format = self._canonical_image_format(dst_path)
-        return source_format != destination_format
-
-    def _canonical_image_format(self, path: str) -> str:
-        """Normalize equivalent image extensions for copy/transcode decisions."""
-        extension = os.path.splitext(path)[1].lower().lstrip('.')
-        aliases = {'jpeg': 'jpg', 'tif': 'tiff'}
-        return aliases.get(extension, extension)
-
-    def _resize_image(self, image, width: int):
-        """Resize an image to a width while preserving its aspect ratio."""
-        height = int(image.shape[0] * (width / image.shape[1]))
-        if height % 2 != 0:
-            height += 1
-        return cv2.resize(image, (width, height), interpolation=cv2.INTER_AREA)
-    
     def _save_metadata(
         self,
         output_dir: str,

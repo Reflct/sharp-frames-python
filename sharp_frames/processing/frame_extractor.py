@@ -37,12 +37,8 @@ class FrameExtractor:
         self._active_process: Optional[subprocess.Popen] = None
 
     def cancel_processing(self) -> None:
-        """Request cancellation and terminate an active FFmpeg process."""
+        """Request cancellation without blocking the caller."""
         self._cancellation_event.set()
-        with self._process_lock:
-            process = self._active_process
-        if process is not None and process.poll() is None:
-            self._terminate_process(process)
 
     def reset_cancellation(self) -> None:
         """Prepare this extractor for an explicitly requested new operation."""
@@ -381,32 +377,38 @@ class FrameExtractor:
             is_hdr=False
         )
     
+    @staticmethod
+    def _build_video_filters(
+        fps: int,
+        width: int,
+        color_info: Optional['VideoColorInfo'] = None,
+    ) -> List[str]:
+        """Build an efficient, color-correct FFmpeg filter sequence."""
+        from .colorspace import build_colorspace_filter
+
+        filters = [f"fps={fps}"]
+        resize_consumed = False
+
+        if color_info is not None:
+            colorspace_filter = build_colorspace_filter(
+                color_info,
+                width=width if color_info.is_hdr else 0,
+            )
+            if colorspace_filter:
+                filters.append(colorspace_filter)
+                resize_consumed = color_info.is_hdr and width > 0
+
+        if width > 0 and not resize_consumed:
+            filters.append(f"scale={width}:-1:flags=lanczos")
+
+        return filters
+
     def _run_ffmpeg_extraction(self, video_path: str, output_dir: str, fps: int,
                               output_format: str, width: int, duration: Optional[float] = None,
                               color_info: Optional['VideoColorInfo'] = None) -> bool:
         """Run FFmpeg to extract frames from video with progress monitoring and color space conversion."""
-        from .colorspace import build_colorspace_filter
-
         output_pattern = os.path.join(output_dir, f"frame_%05d.{output_format}")
-
-        # Build video filters - order matters!
-        vf_filters = []
-
-        # 1. Color space conversion FIRST (before any scaling)
-        if color_info is not None:
-            colorspace_filter = build_colorspace_filter(color_info)
-            if colorspace_filter:
-                vf_filters.append(colorspace_filter)
-
-        # 2. FPS filter
-        vf_filters.append(f"fps={fps}")
-
-        # 3. Scale filter (after color conversion)
-        if width > 0:
-            # Use lanczos scaling for high-quality downsampling
-            vf_filters.append(f"scale={width}:-1:flags=lanczos")
-
-        vf_string = ",".join(vf_filters)
+        vf_string = ",".join(self._build_video_filters(fps, width, color_info))
         
         # Use proper executable name based on platform
         ffmpeg_executable = 'ffmpeg.exe' if os.name == 'nt' else 'ffmpeg'

@@ -222,6 +222,35 @@ class TestBuildColorspaceFilter:
         assert 'tin=' in filter_str
         assert 'pin=' in filter_str
 
+    @patch('sharp_frames.processing.colorspace.is_zscale_available', return_value=True)
+    def test_hdr_filter_applies_resize_before_float_intermediate(self, mock_zscale):
+        info = VideoColorInfo(
+            color_primaries=ColorPrimaries.BT2020,
+            transfer_function=TransferFunction.PQ,
+            color_matrix=ColorMatrix.BT2020_NCL,
+            is_hdr=True,
+        )
+
+        filter_str = build_colorspace_filter(info, width=640)
+
+        first_filter, float_format = filter_str.split(",", 1)
+        assert "w=640:h=-2:f=lanczos" in first_filter
+        assert float_format.startswith("format=gbrpf32le")
+
+    @pytest.mark.parametrize("is_hdr", [False, True])
+    def test_bt2020_constant_luminance_is_rejected(self, is_hdr):
+        info = VideoColorInfo(
+            color_primaries=ColorPrimaries.BT2020,
+            transfer_function=(
+                TransferFunction.PQ if is_hdr else TransferFunction.BT709
+            ),
+            color_matrix=ColorMatrix.BT2020_CL,
+            is_hdr=is_hdr,
+        )
+
+        with pytest.raises(RuntimeError, match="constant-luminance"):
+            build_colorspace_filter(info)
+
     @patch('sharp_frames.processing.colorspace.is_zscale_available', return_value=False)
     def test_hdr_filter_fallback_without_zscale(self, mock_zscale):
         """HDR conversion fails clearly when tone mapping is unavailable."""
