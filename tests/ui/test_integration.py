@@ -180,7 +180,7 @@ async def test_title_shimmer_finishes_on_the_original_title(monkeypatch):
             if shown_frames and shown_frames[-1] == last_frame_index:
                 break
             await pilot.pause(0.05)
-        assert shown_frames and shown_frames[-1] == last_frame_index
+        assert shown_frames == list(range(1, len(title.frames)))
 
         rendered = title.render()
         assert rendered.plain == title.frames[-1].plain

@@ -3,8 +3,6 @@ Configuration screen for Sharp Frames UI.
 Removes selection method configuration (moved to post-extraction SelectionScreen).
 """
 
-from functools import partial
-
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.containers import Container, Horizontal
@@ -132,13 +130,34 @@ class AsciiTitleShimmer(Static):
         if self.app.animation_level == "none":
             return
 
-        for frame_index in range(1, len(self.frames)):
-            self.set_timer(
-                self.INITIAL_DELAY_SECONDS
-                + (frame_index - 1) * self.FRAME_INTERVAL_SECONDS,
-                partial(self._show_frame, frame_index),
-                name=f"title-shimmer-{frame_index}",
-            )
+        self.set_timer(
+            self.INITIAL_DELAY_SECONDS,
+            self._start_shimmer,
+            name="title-shimmer-start",
+        )
+
+    def _start_shimmer(self) -> None:
+        """Advance frames on one interval timer so they can never reorder.
+
+        Independent per-frame timers whose deadlines sit closer together
+        than the platform timer resolution (notably Windows) may fire out
+        of order, ending the pass on a shimmer frame instead of the title.
+        """
+        self._show_frame(1)
+        self._next_frame_index = 2
+        self._shimmer_timer = self.set_interval(
+            self.FRAME_INTERVAL_SECONDS,
+            self._advance_frame,
+            name="title-shimmer",
+        )
+
+    def _advance_frame(self) -> None:
+        """Show the next frame and stop the interval after the last one."""
+        self._show_frame(self._next_frame_index)
+        if self._next_frame_index >= len(self.frames) - 1:
+            self._shimmer_timer.stop()
+        else:
+            self._next_frame_index += 1
 
     def _show_frame(self, frame_index: int) -> None:
         """Swap colour spans without recalculating the stable title layout."""
