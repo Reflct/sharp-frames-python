@@ -158,15 +158,29 @@ def test_title_shimmer_changes_only_color_across_the_full_title():
 async def test_title_shimmer_finishes_on_the_original_title(monkeypatch):
     monkeypatch.setattr(AsciiTitleShimmer, "INITIAL_DELAY_SECONDS", 0.001)
     monkeypatch.setattr(AsciiTitleShimmer, "FRAME_INTERVAL_SECONDS", 0.005)
+
+    # The final frame renders the same spans as the initial one, so completion
+    # must be observed through the frame callbacks rather than the render
+    # output. Timers fire late on slow CI runners; poll with a deadline
+    # instead of sleeping for the nominal animation duration.
+    shown_frames = []
+    original_show_frame = AsciiTitleShimmer._show_frame
+
+    def recording_show_frame(self, frame_index):
+        shown_frames.append(frame_index)
+        original_show_frame(self, frame_index)
+
+    monkeypatch.setattr(AsciiTitleShimmer, "_show_frame", recording_show_frame)
     form = ConfigurationForm()
 
     async with ScreenHarness(form).run_test() as pilot:
         title = form.query_one("#ascii-title", AsciiTitleShimmer)
-        animation_duration = (
-            title.INITIAL_DELAY_SECONDS
-            + (len(title.frames) - 2) * title.FRAME_INTERVAL_SECONDS
-        )
-        await pilot.pause(animation_duration + 0.05)
+        last_frame_index = len(title.frames) - 1
+        for _ in range(200):
+            if shown_frames and shown_frames[-1] == last_frame_index:
+                break
+            await pilot.pause(0.05)
+        assert shown_frames and shown_frames[-1] == last_frame_index
 
         rendered = title.render()
         assert rendered.plain == title.frames[-1].plain
