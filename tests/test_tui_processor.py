@@ -63,8 +63,8 @@ class TestTUIProcessor:
             
             result = self.processor.extract_and_analyze(config)
             
-            mock_extract.assert_called_once_with(config)
-            mock_analyze.assert_called_once_with(mock_extraction_result)
+            mock_extract.assert_called_once_with(config, None)
+            mock_analyze.assert_called_once_with(mock_extraction_result, None)
             
             assert result == analyzed_result
             assert self.processor.current_result == analyzed_result
@@ -214,7 +214,12 @@ class TestTUIProcessor:
             result = self.processor.complete_selection('best_n', config, n=10)
             
             mock_select.assert_called_once_with(sample_frames_data, 'best_n', n=10)
-            mock_save.assert_called_once_with(selected_frames, config)
+            expected_config = {
+                **config,
+                'selection_method': 'best_n',
+                'n': 10,
+            }
+            mock_save.assert_called_once_with(selected_frames, expected_config)
             assert result is True
     
     def test_complete_selection_no_extraction_result(self, sample_config_video):
@@ -270,7 +275,9 @@ class TestTUIProcessor:
         with patch('shutil.rmtree') as mock_rmtree:
             self.processor.cleanup_temp_directory()
             
-            mock_rmtree.assert_called_once_with('/tmp/sharp_frames_test')
+            mock_rmtree.assert_called_once_with(
+                '/tmp/sharp_frames_test', ignore_errors=True
+            )
             # Current result should still exist but temp_dir should be cleared
             assert self.processor.current_result is not None
             assert self.processor.current_result.temp_dir is None
@@ -351,7 +358,6 @@ class TestTUIProcessor:
             with pytest.raises(Exception, match="Extraction failed"):
                 self.processor.extract_and_analyze(config)
             
-            # Should not have set current_result on failure
             assert self.processor.current_result is None
     
     def test_error_handling_in_analysis(self, sample_config_video):
@@ -370,7 +376,7 @@ class TestTUIProcessor:
             with pytest.raises(Exception, match="Analysis failed"):
                 self.processor.extract_and_analyze(config)
             
-            # Should not have set current_result on failure
+            # Failed analysis cannot leave a result eligible for selection.
             assert self.processor.current_result is None
     
     def test_component_integration(self, sample_config_video):
@@ -406,11 +412,16 @@ class TestTUIProcessor:
             save_result = self.processor.complete_selection('best_n', config, n=2)
             
             # Verify the chain of calls
-            mock_extract.assert_called_once_with(config)
-            mock_analyze.assert_called_once_with(extraction_result)
+            mock_extract.assert_called_once_with(config, None)
+            mock_analyze.assert_called_once_with(extraction_result, None)
             mock_preview.assert_called_once_with(mock_frames, 'best_n', n=2)
             mock_select.assert_called_once_with(mock_frames, 'best_n', n=2)
-            mock_save.assert_called_once_with(mock_frames[:2], config)
+            expected_config = {
+                **config,
+                'selection_method': 'best_n',
+                'n': 2,
+            }
+            mock_save.assert_called_once_with(mock_frames[:2], expected_config)
             
             # Verify results
             assert analyzed_result == extraction_result

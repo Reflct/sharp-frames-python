@@ -7,7 +7,11 @@ from typing import List, Dict, Any, Tuple, Set
 from .sharp_frames_processor import SharpFrames, ImageProcessingError
 
 # Import video directory utilities
-from .video_utils import get_video_files_in_directory, detect_input_type
+from .video_utils import (
+    detect_input_type,
+    get_video_files_in_directory,
+    is_video_file,
+)
 
 # Helper functions for interactive mode
 def get_valid_file_path(prompt: str, must_exist: bool = True) -> str:
@@ -27,7 +31,12 @@ def get_valid_file_path(prompt: str, must_exist: bool = True) -> str:
         if must_exist and not os.path.isfile(path):
             print(f"Error: File '{path}' not found. Please enter a valid file path.")
             continue
-            
+        if must_exist and not is_video_file(path):
+            print(
+                f"Error: File '{path}' is not a recognizable supported video."
+            )
+            continue
+
         return path
 
 def get_valid_dir_path(prompt: str, create_if_missing: bool = True, check_emptiness: bool = True) -> str:
@@ -169,9 +178,9 @@ def main():
     parser.add_argument("--batch-buffer", type=int, default=2,
                        help="Number of frames to skip between batches (default: 2)")
     parser.add_argument("--outlier-window-size", type=int, default=15,
-                       help="Number of neighboring frames to compare for outlier detection (default: 15)")
-    parser.add_argument("--outlier-sensitivity", type=int, default=50,
-                       help="Sensitivity of outlier detection, 0-100 (default: 50)")
+                       help="Local comparison window for outlier detection, minimum 5 (default: 15)")
+    parser.add_argument("--outlier-sensitivity", type=int, default=60,
+                       help="Sensitivity of outlier detection, 0-100 (default: 60)")
     parser.add_argument("--width", type=int, default=0,
                        help="Width to resize output images (height will be adjusted proportionally, 0 for no resizing)")
     parser.add_argument("--interactive", action="store_true", help="Run in legacy terminal prompt mode")
@@ -210,8 +219,12 @@ def main():
         print(f"Error: Input path not found: {args.input_path}")
         return 1
 
-    input_type = detect_input_type(args.input_path)
-    
+    try:
+        input_type = detect_input_type(args.input_path)
+    except ValueError as exc:
+        print(f"Error: {exc}")
+        return 1
+
     # Handle input type specific logic
     if input_type == "directory":
         print("Input path is a directory. Processing images.")
@@ -323,7 +336,7 @@ def run_interactive_mode():
     batch_size = 5
     batch_buffer = 2
     outlier_window_size = 15
-    outlier_sensitivity = 50
+    outlier_sensitivity = 60
 
     # Get method-specific parameters
     if selection_method == "best-n":
@@ -333,8 +346,8 @@ def run_interactive_mode():
         batch_size = get_valid_int("Enter batch size", min_value=1, default=5)
         batch_buffer = get_valid_int("Enter batch buffer (frames/images to skip between batches)", min_value=0, default=2)
     elif selection_method == "outlier-removal":
-        outlier_window_size = get_valid_int("Enter window size for comparison", min_value=3, max_value=30, default=15)
-        outlier_sensitivity = get_valid_int("Enter sensitivity (0-100, higher is more aggressive)", min_value=0, max_value=100, default=50)
+        outlier_window_size = get_valid_int("Enter window size for comparison", min_value=5, max_value=31, default=15)
+        outlier_sensitivity = get_valid_int("Enter sensitivity (0-100, higher is more aggressive)", min_value=0, max_value=100, default=60)
 
     output_format = get_choice(
         "Choose output format for saved images (or first 3 letters)",

@@ -6,12 +6,16 @@ import cv2
 import concurrent.futures
 import os
 import sys
-import time
 import threading
 from multiprocessing import cpu_count
 from typing import List, Callable, Optional
 from tqdm import tqdm
 
+from ..focus_scoring import (
+    ANALYSIS_LONG_EDGE,
+    FOCUS_SCORE_METHOD,
+    calculate_focus_score,
+)
 from ..models.frame_data import FrameData, ExtractionResult
 
 
@@ -21,7 +25,7 @@ class ImageProcessingError(Exception):
 
 
 class SharpnessAnalyzer:
-    """Calculates sharpness scores for frames using parallel processing."""
+    """Calculates normalized focus scores for frames using parallel processing."""
     
     def __init__(self, max_workers: Optional[int] = None):
         """
@@ -45,6 +49,10 @@ class SharpnessAnalyzer:
     def cancel_processing(self):
         """Cancel ongoing sharpness analysis."""
         self._cancellation_event.set()
+
+    def reset_cancellation(self):
+        """Prepare the analyzer for an explicitly requested new operation."""
+        self._cancellation_event.clear()
         
     def calculate_sharpness(self, extraction_result: ExtractionResult, progress_callback=None) -> ExtractionResult:
         """
@@ -77,23 +85,40 @@ class SharpnessAnalyzer:
             progress_callback=callback
         )
         
-        # Update frame data with sharpness scores
+        # Exclude failed reads rather than treating them as valid zero-score frames.
         updated_frames = []
+        unreadable_paths = []
         for frame, score in zip(extraction_result.frames, sharpness_scores):
+            if score is None:
+                unreadable_paths.append(frame.path)
+                continue
             updated_frame = self._update_frame_with_sharpness(frame, score)
             updated_frames.append(updated_frame)
+
+        if not updated_frames and not self._cancellation_event.is_set():
+            raise ImageProcessingError("No readable images were available for analysis")
+
+        metadata = dict(extraction_result.metadata)
+        metadata["sharpness_analysis"] = {
+            "method": FOCUS_SCORE_METHOD,
+            "analysis_long_edge": ANALYSIS_LONG_EDGE,
+            "input_count": len(extraction_result.frames),
+            "analyzed_count": len(updated_frames),
+            "unreadable_count": len(unreadable_paths),
+            "unreadable_paths": unreadable_paths,
+        }
         
         # Create updated extraction result
         return ExtractionResult(
             frames=updated_frames,
-            metadata=extraction_result.metadata,
+            metadata=metadata,
             temp_dir=extraction_result.temp_dir,
             input_type=extraction_result.input_type
         )
     
     def _calculate_sharpness_parallel(self, frame_paths: List[str], 
                                      progress_callback: Optional[Callable] = None,
-                                     chunk_size: int = 100) -> List[float]:
+                                     chunk_size: int = 100) -> List[Optional[float]]:
         """
         Calculate sharpness scores for multiple frames using parallel processing.
         
@@ -103,7 +128,7 @@ class SharpnessAnalyzer:
             chunk_size: Size of processing chunks for memory efficiency
             
         Returns:
-            List of sharpness scores corresponding to frame_paths
+            Scores corresponding to ``frame_paths``; failed reads are ``None``
         """
         scores = []
         total_frames = len(frame_paths)
@@ -127,9 +152,9 @@ class SharpnessAnalyzer:
         return scores
     
     def _process_chunk_parallel(self, frame_paths: List[str], 
-                               progress_callback: Optional[Callable] = None) -> List[float]:
+                               progress_callback: Optional[Callable] = None) -> List[Optional[float]]:
         """Process a chunk of frames in parallel with Windows-specific error handling."""
-        scores = [0.0] * len(frame_paths)  # Initialize with default scores
+        scores: List[Optional[float]] = [None] * len(frame_paths)
         num_workers = min(self.max_workers, len(frame_paths)) if frame_paths else 1
         
         # Track progress across the chunk
@@ -182,10 +207,10 @@ class SharpnessAnalyzer:
                             
                         except concurrent.futures.TimeoutError:
                             print(f"Warning: Timeout processing {path}")
-                            scores[idx] = 0.0
+                            scores[idx] = None
                         except Exception as e:
                             print(f"Warning: Failed to process {path}: {e}")
-                            scores[idx] = 0.0  # Use default score for failed frames
+                            scores[idx] = None
                         
                         # Update progress after each frame with timeout protection
                         completed_count += 1
@@ -210,13 +235,12 @@ class SharpnessAnalyzer:
             if self._is_windows and len(frame_paths) <= 10:
                 print("Attempting fallback to sequential processing on Windows...")
                 return self._process_chunk_sequential(frame_paths, progress_callback)
-            # Return zeros for all frames on complete failure
-            return [0.0] * len(frame_paths)
+            return [None] * len(frame_paths)
         
         return scores
     
     def _process_chunk_sequential(self, frame_paths: List[str], 
-                                 progress_callback: Optional[Callable] = None) -> List[float]:
+                                 progress_callback: Optional[Callable] = None) -> List[Optional[float]]:
         """Fallback sequential processing for Windows when threading fails."""
         scores = []
         total_frames = len(frame_paths)
@@ -231,7 +255,7 @@ class SharpnessAnalyzer:
                 scores.append(score)
             except Exception as e:
                 print(f"Warning: Failed to process {path}: {e}")
-                scores.append(0.0)
+                scores.append(None)
             
             # Update progress
             if progress_callback:
@@ -241,21 +265,21 @@ class SharpnessAnalyzer:
                 except Exception as e:
                     print(f"Warning: Progress callback failed: {e}")
         
-        # Pad with zeros if processing was cancelled early
+        # Unprocessed entries remain explicit failures.
         while len(scores) < total_frames:
-            scores.append(0.0)
+            scores.append(None)
             
         return scores
     
     def _calculate_single_frame_sharpness(self, frame_path: str) -> float:
         """
-        Calculate sharpness score for a single frame using Laplacian variance.
+        Calculate a normalized Laplacian/Tenengrad focus score for one frame.
         
         Args:
             frame_path: Path to the frame image file
             
         Returns:
-            Sharpness score (Laplacian variance)
+            Resolution-normalized focus score
             
         Raises:
             ImageProcessingError: If frame processing fails
@@ -270,12 +294,7 @@ class SharpnessAnalyzer:
             if img_gray is None:
                 raise ImageProcessingError(f"Failed to read image: {frame_path}")
             
-            # Calculate Laplacian variance on resized image for efficiency
-            height, width = img_gray.shape
-            img_half = cv2.resize(img_gray, (width // 2, height // 2), interpolation=cv2.INTER_AREA)
-            
-            score = self._calculate_laplacian_variance(img_half)
-            return float(score)
+            return calculate_focus_score(img_gray)
             
         except cv2.error as e:
             raise ImageProcessingError(f"OpenCV error processing {frame_path}: {str(e)}") from e

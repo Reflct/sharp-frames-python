@@ -15,6 +15,12 @@ import concurrent.futures # Add concurrent.futures import
 # Add tqdm for progress visualization (mandatory dependency)
 from tqdm import tqdm
 
+from .focus_scoring import calculate_focus_score
+from .image_output import (
+    canonical_image_format,
+    transcode_image,
+)
+
 # Import selection strategy functions
 from .selection_methods import (
     select_best_n_frames,
@@ -23,7 +29,11 @@ from .selection_methods import (
 )
 
 # Import video directory utilities
-from .video_utils import get_video_files_in_directory
+from .video_utils import (
+    SUPPORTED_IMAGE_EXTENSIONS,
+    get_video_files_in_directory,
+    natural_path_key,
+)
 
 # Define a custom exception for image processing errors
 class ImageProcessingError(Exception):
@@ -50,7 +60,7 @@ class SharpFrames:
 
                  # --- Parameters for 'outlier-removal' selection ---
                  outlier_window_size: int = 15,
-                 outlier_sensitivity: int = 50,
+                 outlier_sensitivity: int = 60,
                  
                  # --- Parameters for image resizing ---
                  width: int = 0):
@@ -58,8 +68,7 @@ class SharpFrames:
         # --- Constants ---
         # Filename format for output files
         self.OUTPUT_FILENAME_FORMAT = "frame_{seq:05d}.{ext}"
-        # Supported image extensions for directory input
-        self.SUPPORTED_IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png'}
+        self.SUPPORTED_IMAGE_EXTENSIONS = SUPPORTED_IMAGE_EXTENSIONS
         # Weights for composite score calculation in 'best-n' selection
         self.BEST_N_SHARPNESS_WEIGHT = 0.7
         self.BEST_N_DISTRIBUTION_WEIGHT = 0.3
@@ -127,9 +136,16 @@ class SharpFrames:
             if duration:
                 print(f"Video duration: {self._format_duration(duration)}")
 
+            # Extract color space from existing video_info (no extra ffprobe call)
+            from .processing.colorspace import get_color_info_description
+            color_info = self._extract_color_info_from_video_info(video_info)
+            if color_info.needs_conversion:
+                print(f"Detected color space: {get_color_info_description(color_info)}")
+                print("Will convert to sRGB/BT.709")
+
             print(f"Extracting frames at {self.fps} fps...")
             # Extract frames relies on self.temp_dir being set
-            self._extract_frames(duration)
+            self._extract_frames(duration, color_info)
 
             # Get paths from temp directory
             frame_paths = self._get_frame_paths()
@@ -186,7 +202,7 @@ class SharpFrames:
                 self.batch_buffer
             )
         elif self.selection_method == "outlier-removal":
-            # Outlier removal returns all frames with a 'selected' flag
+            # Outlier detection returns all frames with a 'selected' flag
             all_frames_data = select_outlier_removal_frames(
                 frames_with_scores,
                 self.outlier_window_size,
@@ -241,7 +257,9 @@ class SharpFrames:
             # --- Save Phase ---
             print(f"Saving {len(selected_frames_data)} selected frames/images...")
             with tqdm(total=len(selected_frames_data), desc="Saving selected items") as progress_bar:
-                self._save_frames(selected_frames_data, progress_bar)
+                if not self._save_frames(selected_frames_data, progress_bar):
+                    print("One or more selected items could not be saved.")
+                    return False
 
             print(f"Successfully processed. Selected items saved to: {self.output_dir}")
             return True
@@ -295,17 +313,24 @@ class SharpFrames:
                 
                 # Extract video info and frames for this video
                 print("Extracting video information...")
+                video_info = None
+                color_info = None
                 try:
                     video_info = self._get_video_info()
                     duration = self._extract_duration(video_info)
                     if duration:
                         print(f"Video duration: {self._format_duration(duration)}")
+                    # Extract color space from existing video_info (no extra ffprobe call)
+                    color_info = self._extract_color_info_from_video_info(video_info)
                 except Exception as e:
                     print(f"Warning: Could not extract video info for {os.path.basename(video_path)}: {e}")
                     duration = None
-                
+                    # Fallback to separate color detection if video_info failed
+                    from .processing.colorspace import detect_color_space
+                    color_info = detect_color_space(video_path)
+
                 print(f"Extracting frames at {self.fps} fps...")
-                if self._extract_frames(duration):
+                if self._extract_frames(duration, color_info):
                     # Get frame paths from this video
                     video_frame_paths = self._get_frame_paths()
                     print(f"Extracted {len(video_frame_paths)} frames from {os.path.basename(video_path)}")
@@ -371,8 +396,8 @@ class SharpFrames:
                         subprocess.run(["ffprobe", "-version"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, text=True)
                         progress_bar.update(1)
                     except (subprocess.SubprocessError, FileNotFoundError):
-                        # This is only a warning as duration extraction is a nice-to-have
-                        print("Warning: FFprobe is not installed or not in PATH. Video duration cannot be determined.")
+                        print("Error: FFprobe is not installed or not in PATH. Required for video input.")
+                        return False
 
                 # Always check for OpenCV (needed for sharpness calculation)
                 # A simple check if cv2 was imported successfully is enough here
@@ -408,50 +433,82 @@ class SharpFrames:
         return None
     
     def _get_video_info(self) -> Dict[str, Any]:
-        """Get video metadata using FFmpeg"""
-        # Try using ffprobe for more detailed info
+        """Get video metadata using FFmpeg including color space info."""
+        # Try using ffprobe for more detailed info including color metadata
         probe_command = [
-            "ffprobe", 
+            "ffprobe",
             "-v", "error",
             "-show_entries", "format=duration",
             "-select_streams", "v:0",
-            "-show_entries", "stream=width,height,avg_frame_rate,duration",
+            "-show_entries", "stream=width,height,avg_frame_rate,duration,color_primaries,color_transfer,color_space",
             "-of", "json",
             self.input_path
         ]
-        
+
         try:
             probe_result = subprocess.run(
-                probe_command, 
-                stdout=subprocess.PIPE, 
-                stderr=subprocess.PIPE, 
+                probe_command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 check=True,
                 text=True
             )
-            
+
             video_info = json.loads(probe_result.stdout)
             return video_info
         except subprocess.CalledProcessError:
             # Fallback if ffprobe fails
             return {"error": "Failed to get video info"}
+
+    def _extract_color_info_from_video_info(self, video_info: Dict[str, Any]):
+        """Extract color space info from existing video_info (avoids extra ffprobe call)."""
+        from .processing.colorspace import parse_color_info_from_stream, VideoColorInfo, ColorPrimaries, TransferFunction, ColorMatrix
+
+        streams = video_info.get('streams', [])
+        if streams:
+            return parse_color_info_from_stream(streams[0])
+
+        # No stream found, return default
+        return VideoColorInfo(
+            color_primaries=ColorPrimaries.UNKNOWN,
+            transfer_function=TransferFunction.UNKNOWN,
+            color_matrix=ColorMatrix.UNKNOWN,
+            is_hdr=False
+        )
     
-    def _extract_frames(self, duration: float = None) -> bool:
-        """Extract frames from video using FFmpeg"""
+    def _extract_frames(self, duration: float = None, color_info=None) -> bool:
+        """Extract through the canonical, cancellation-safe FFmpeg runner."""
+        from .processing.frame_extractor import FrameExtractor
+
+        extractor = FrameExtractor()
+        success = extractor._run_ffmpeg_extraction(
+            self.input_path,
+            self.temp_dir,
+            self.fps,
+            self.output_format,
+            self.width,
+            duration,
+            color_info,
+        )
+        if not success:
+            raise RuntimeError(f"Frame extraction failed for {self.input_path}")
+        return True
+
+    def _extract_frames_legacy(self, duration: float = None, color_info=None) -> bool:
+        """Deprecated pre-canonical FFmpeg runner retained for compatibility tests."""
+        from .processing.frame_extractor import FrameExtractor
+
         output_pattern = os.path.join(self.temp_dir, f"frame_%05d.{self.output_format}")
-        
+
         # Set a timeout threshold for the process in case it hangs
         process_timeout_seconds = 3600 # 1 hour timeout for FFmpeg process
-        
-        # Build the video filters string
-        vf_filters = []
-        vf_filters.append(f"fps={self.fps}")
-        
-        # Add scaling filter if width is specified
-        if self.width > 0:
-            vf_filters.append(f"scale={self.width}:-2")  # -2 maintains aspect ratio and ensures even height
-            
-        # Join all filters with commas
-        vf_string = ",".join(vf_filters)
+        vf_string = ",".join(
+            FrameExtractor._build_video_filters(
+                self.fps,
+                self.width,
+                color_info,
+            )
+        )
         
         command = [
             "ffmpeg",
@@ -646,8 +703,7 @@ class SharpFrames:
             print(f"Error scanning directory {self.input_path}: {str(e)}")
             raise
 
-        # Sort paths alphabetically for consistent ordering
-        image_paths.sort()
+        image_paths.sort(key=natural_path_key)
 
         if not image_paths:
             print(f"Warning: No supported image files ({supported_extensions_str}) found in {self.input_path}.")
@@ -695,6 +751,17 @@ class SharpFrames:
                                 "index": idx,
                                 "sharpnessScore": score
                             }
+                            if self.input_type == "video_directory":
+                                frame_data["source_video"] = os.path.basename(
+                                    os.path.dirname(path)
+                                )
+                                try:
+                                    local_number = int(
+                                        os.path.splitext(frame_id)[0].rsplit("_", 1)[1]
+                                    )
+                                    frame_data["source_index"] = local_number - 1
+                                except (IndexError, ValueError):
+                                    frame_data["source_index"] = None
                             frames_data.append(frame_data)
                         except ImageProcessingError as e:
                             # Log specific image processing errors and continue
@@ -732,92 +799,96 @@ class SharpFrames:
                 # Raise custom exception if image reading fails
                 raise ImageProcessingError(f"Failed to read image: {path}")
 
-            height, width = img_gray.shape
-            # Use INTER_AREA for downscaling - generally preferred
-            img_half = cv2.resize(img_gray, (width // 2, height // 2), interpolation=cv2.INTER_AREA)
-
-            # Calculate Laplacian variance
-            score = float(cv2.Laplacian(img_half, cv2.CV_64F).var())
-
-            return score
+            return calculate_focus_score(img_gray)
         except cv2.error as e:
             # Wrap OpenCV errors
             raise ImageProcessingError(f"OpenCV error processing {path}: {str(e)}") from e
 
-    def _save_frames(self, selected_frames: List[Dict[str, Any]], progress_bar=None) -> None:
-        """Save selected frames/images to output directory."""
+    def _save_frames(self, selected_frames: List[Dict[str, Any]], progress_bar=None) -> bool:
+        """Save every selected item and return whether the operation fully succeeded."""
+        output_format = str(self.output_format).strip().lower().lstrip('.') or "jpg"
+        output_format = {'jpeg': 'jpg', 'tif': 'tiff'}.get(
+            output_format, output_format
+        )
+        if self.input_type == "directory":
+            output_names = self._plan_directory_output_names(
+                selected_frames, output_format
+            )
+        else:
+            output_names = [
+                self.OUTPUT_FILENAME_FORMAT.format(seq=index + 1, ext=output_format)
+                for index in range(len(selected_frames))
+            ]
+
         metadata_list = []
-        for i, frame_data in enumerate(selected_frames):
+        failed_count = 0
+        for frame_data, filename in zip(selected_frames, output_names):
             src_path = frame_data["path"]
             original_id = frame_data["id"]
             original_index = frame_data["index"]
             sharpness_score = frame_data["sharpnessScore"]
-
-            # Use original filename for directory input, sequential naming for video input
-            if self.input_type == "directory":
-                filename = original_id  # Use the original filename directly
-            else:
-                # Use the defined constant format string for video frames and video directory
-                filename = self.OUTPUT_FILENAME_FORMAT.format(
-                    seq=i+1,
-                    ext=self.output_format
-                )
             dst_path = os.path.join(self.output_dir, filename)
 
             try:
-                # If width is set and we're in directory mode (video modes already handle this during extraction)
-                if self.width > 0 and self.input_type == "directory":
-                    # Load the image with OpenCV
-                    img = cv2.imread(src_path)
-                    if img is None:
-                        raise ImageProcessingError(f"Failed to read image for resizing: {src_path}")
-                    
-                    # Calculate height to maintain aspect ratio
-                    height = int(img.shape[0] * (self.width / img.shape[1]))
-                    # Ensure height is even
-                    if height % 2 != 0:
-                        height += 1
-                    
-                    # Resize the image
-                    resized_img = cv2.resize(img, (self.width, height), interpolation=cv2.INTER_AREA)
-                    
-                    # Save the resized image
-                    cv2.imwrite(dst_path, resized_img)
+                if self.input_type == "directory" and (
+                    self.width > 0
+                    or canonical_image_format(src_path) != output_format
+                ):
+                    transcode_image(src_path, dst_path, self.width)
                 else:
-                    # Normal copy for non-resized or video frames
                     shutil.copy2(src_path, dst_path)
             except Exception as e:
-                 print(f"Error saving {src_path} to {dst_path}: {e}")
-                 # Optionally skip this frame and continue, or re-raise
-                 continue
+                failed_count += 1
+                print(f"Error saving {src_path} to {dst_path}: {e}")
+            else:
+                metadata_list.append({
+                    "output_filename": filename,
+                    "original_id": original_id,
+                    "original_index": original_index,
+                    "sharpness_score": sharpness_score
+                })
+            finally:
+                if progress_bar:
+                    progress_bar.update(1)
 
-            metadata_list.append({
-                "output_filename": filename,
-                "original_id": original_id, # Original filename or frame ID
-                "original_index": original_index,
-                "sharpness_score": sharpness_score
-            })
-
-            if progress_bar:
-                progress_bar.update(1)
-
-        # Save metadata about the selected files
         metadata_path = os.path.join(self.output_dir, "selected_metadata.json")
         try:
-            with open(metadata_path, "w") as f:
+            with open(metadata_path, "w", encoding="utf-8") as f:
                 json.dump({
                     "input_path": self.input_path,
                     "input_type": self.input_type,
-                    "total_selected": len(metadata_list),
+                    "total_selected": len(selected_frames),
+                    "total_saved": len(metadata_list),
+                    "total_failed": failed_count,
+                    "output_format": output_format,
                     "selection_method": self.selection_method,
-                    # Include resize width in metadata if set
                     "resize_width": self.width if self.width > 0 else None,
-                    # Include method-specific params in metadata
                     **self._get_method_params_for_metadata(),
                     "selected_items": metadata_list
                 }, f, indent=2)
         except Exception as e:
-             print(f"Error writing metadata file {metadata_path}: {str(e)}")
+            print(f"Error writing metadata file {metadata_path}: {str(e)}")
+            return False
+
+        return failed_count == 0
+
+    @staticmethod
+    def _plan_directory_output_names(
+        selected_frames: List[Dict[str, Any]], output_format: str
+    ) -> List[str]:
+        """Create deterministic, case-insensitively unique encoded filenames."""
+        used_names = set()
+        output_names = []
+        for frame_data in selected_frames:
+            stem = os.path.splitext(os.path.basename(frame_data["id"]))[0]
+            candidate = f"{stem}.{output_format}"
+            suffix = 2
+            while candidate.casefold() in used_names:
+                candidate = f"{stem}_{suffix}.{output_format}"
+                suffix += 1
+            used_names.add(candidate.casefold())
+            output_names.append(candidate)
+        return output_names
 
     def _get_method_params_for_metadata(self) -> Dict[str, Any]:
         """Returns parameters relevant to the current selection method for metadata."""

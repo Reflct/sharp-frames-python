@@ -1,6 +1,6 @@
 """Sharp Frames - Extract, score, and select the best frames from a video, video directory, or image directory."""
 
-__version__ = "0.3.1"
+__version__ = "0.4.0"
 
 import subprocess
 import sys
@@ -49,12 +49,12 @@ if not _has_ffmpeg:
 
 if not _has_ffprobe:
     ffprobe_warning = (
-        "\n⚠️  WARNING: FFprobe not found in PATH. Video duration detection will be limited.\n"
+        "\n⚠️  WARNING: FFprobe not found in PATH. Video processing will not work.\n"
         "   FFprobe is typically installed with FFmpeg: https://ffmpeg.org/download.html\n"
     )
     print(ffprobe_warning, file=sys.stderr)
     warnings.warn(
-        "FFprobe not found in PATH. Video duration detection will be limited.",
+        "FFprobe not found in PATH. Video processing will not work.",
         ImportWarning
     )
 
@@ -63,4 +63,4 @@ from .selection_methods import (
     select_best_n_frames,
     select_batched_frames,
     select_outlier_removal_frames
-) 
+)

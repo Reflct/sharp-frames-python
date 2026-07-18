@@ -14,10 +14,12 @@ Or with pipx for isolated installation:
 pipx install sharp-frames
 ```
 
-**IMPORTANT: Video Processing Requirement**: Install FFmpeg separately for video input support.
+**IMPORTANT: Video Processing Requirement**: Install an FFmpeg distribution that includes both `ffmpeg` and `ffprobe`. Both executables must be on `PATH`; image-directory processing does not require them.
 - **Windows**: Download from [FFmpeg website](https://ffmpeg.org/download.html) and add to PATH
 - **macOS**: `brew install ffmpeg`
 - **Linux**: `sudo apt install ffmpeg`
+
+HDR-to-SDR extraction additionally requires an FFmpeg build with the `zscale` filter (`libzimg`). You can verify support with `ffmpeg -filters | grep zscale`. Non-HDR video processing does not require `zscale`.
 
 ## Quick Start
 
@@ -45,9 +47,9 @@ sharp-frames <input> <output> [options]
 ```
 
 **Input Types:**
-- Video files: `.mp4`, `.avi`, `.mov`, `.mkv`, `.wmv`, `.flv`, `.webm`, `.m4v`, etc.
+- Video files: `.mp4`, `.avi`, `.mov`, `.mkv`, `.wmv`, `.flv`, `.webm`, `.m4v`, `.3gp`, `.3g2`, `.ogv`, `.ts`, `.mts`, `.m2ts`, `.mpg`, `.mpeg`, `.vob`
 - Video directories: Processes all videos in a folder
-- Image directories: `.jpg`, `.jpeg`, `.png`, `.bmp`, `.tiff`, `.webp`, etc.
+- Image directories: `.jpg`, `.jpeg`, `.png`, `.bmp`, `.tif`, `.tiff`, `.webp`, `.ppm`, `.pgm`, `.pbm`
 
 ## Selection Methods
 
@@ -63,10 +65,10 @@ Divides content into batches and selects the sharpest frame from each batch.
 --selection-method batched --batch-size 5 --batch-buffer 2
 ```
 
-### Outlier Removal
+### Outlier Detection
 Removes unusually blurry frames by comparing each frame to its neighbors.
 ```bash
---selection-method outlier-removal --outlier-window-size 15 --outlier-sensitivity 50
+--selection-method outlier-removal --outlier-window-size 15 --outlier-sensitivity 60
 ```
 
 ## Command Line Options
@@ -79,11 +81,11 @@ Removes unusually blurry frames by comparing each frame to its neighbors.
 
 ### Selection Method Parameters
 - `--num-frames <int>`: Number of frames to select (best-n, default: 300)
-- `--min-buffer <int>`: Minimum gap between selected frames (best-n, default: 3)
+- `--min-buffer <int>`: Minimum number of intervening frames between selected frames (best-n, default: 3)
 - `--batch-size <int>`: Frames per batch (batched, default: 5)
 - `--batch-buffer <int>`: Frames to skip between batches (batched, default: 2)
-- `--outlier-window-size <int>`: Neighbor comparison window (outlier-removal, default: 15)
-- `--outlier-sensitivity <int>`: Removal aggressiveness 0-100 (outlier-removal, default: 50)
+- `--outlier-window-size <int>`: Local comparison window, minimum 5 (outlier-removal, default: 15)
+- `--outlier-sensitivity <int>`: Detection sensitivity 0-100 (outlier-removal, default: 60)
 
 ## Examples
 
@@ -125,23 +127,28 @@ sharp-frames photos selected --selection-method outlier-removal --outlier-sensit
 
 ## Requirements
 
-- Python 3.7 or higher
-- Dependencies installed automatically: `opencv-python`, `numpy`, `tqdm`, `textual`
-- FFmpeg (for video processing only)
+- Python 3.10 or higher
+- Dependencies installed automatically: `opencv-python`, `numpy`, `tqdm`,
+  `textual`, `textual-image`
+- FFmpeg and FFprobe (for video processing only)
+- FFmpeg `zscale`/`libzimg` support (for HDR-to-SDR processing only)
 
 ## How It Works
 
 1. **Validation**: Checks input paths, file formats, and system dependencies
 2.  **Extraction**: Videos are extracted to frames at specified FPS using FFmpeg
-3.  **Analysis**: Calculates sharpness scores using Laplacian variance in parallel
-4.  **Selection**: Applies chosen algorithm to select the best frames/images
+3.  **Analysis**: Normalizes analysis resolution, lightly denoises each image,
+    and combines Laplacian variance with Tenengrad focus scoring in parallel.
+    Unreadable inputs are excluded and reported.
+4.  **Selection**: Applies the chosen source-aware algorithm to select the best
+    naturally ordered frames/images.
 5.  **Output**: Saves selected content with metadata including scores and parameters
 
 ## Output
 
 - Selected frames/images with descriptive filenames
 - `selected_metadata.json` with processing details, parameters, and sharpness scores
-- Preserves original formats for image directory input
+- Transcodes selected images to the configured output format (`jpg` by default)
 - Automatic output directory creation with permission validation
 
 ## Help & Support

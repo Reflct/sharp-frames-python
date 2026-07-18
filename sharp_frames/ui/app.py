@@ -2,12 +2,16 @@
 Main Sharp Frames Textual application.
 """
 
+import asyncio
 import signal
 import os
 import time
 import re
+from collections import deque
+
 from textual.app import App
 from textual.events import Key, Paste
+from textual.notifications import Notification, SeverityLevel
 from textual.widgets import Input
 
 from .screens import ConfigurationForm
@@ -36,12 +40,95 @@ class SharpFramesApp(App):
         self._escape_count = 0
         self._last_action_time = 0
         self._original_signal_handlers = {}
+        self._signal_shutdown_task = None
         super().__init__(**kwargs)
+        self._limited_notifications: dict[str, deque[Notification]] = {}
+
+    def notify_limited(
+        self,
+        message: str,
+        *,
+        channel: str,
+        limit: int = 3,
+        title: str = "",
+        severity: SeverityLevel = "information",
+        timeout: float | None = None,
+        markup: bool = True,
+    ) -> None:
+        """Show a notification while retaining only the newest channel items."""
+        if limit < 1:
+            raise ValueError("Notification limit must be at least one")
+        if timeout is None:
+            timeout = self.NOTIFICATION_TIMEOUT
+
+        active = deque(
+            notification
+            for notification in self._limited_notifications.get(channel, ())
+            if not notification.has_expired
+            and notification in self._notifications
+        )
+        while len(active) >= limit:
+            self._unnotify(active.popleft(), refresh=False)
+
+        notification = Notification(
+            message,
+            title,
+            severity,
+            timeout,
+            markup=markup,
+        )
+        active.append(notification)
+        self._limited_notifications[channel] = active
+        self._notifications.add(notification)
+        self._refresh_notifications()
     
+    def _begin_signal_shutdown(self, screen) -> None:
+        """Wait briefly for cooperative cleanup, then exit after SIGTERM."""
+        if (
+            self._signal_shutdown_task is not None
+            and not self._signal_shutdown_task.done()
+        ):
+            return
+        self._signal_shutdown_task = asyncio.create_task(
+            self._exit_after_cleanup(screen)
+        )
+
+    async def _exit_after_cleanup(self, screen) -> None:
+        """Exit after active processing finishes, with a bounded fallback."""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + 15
+        while loop.time() < deadline:
+            phase_active = (
+                hasattr(screen, "phase_1_complete")
+                and not screen.phase_1_complete
+            )
+            final_task = getattr(screen, "_final_processing_task", None)
+            final_active = final_task is not None and not final_task.done()
+            if not phase_active and not final_active:
+                break
+            await asyncio.sleep(0.1)
+        self.exit(result="terminated")
+
     def setup_signal_handlers(self):
         """Setup signal handlers for cross-platform compatibility."""
         def signal_handler(signum, frame):
-            self.log.info(f"Received signal {signum} in main app, ignoring to prevent premature exit")
+            self.log.info(f"Received signal {signum}; cancelling active processing")
+            current_screen = self.screen_stack[-1] if self.screen_stack else None
+            if current_screen and hasattr(current_screen, 'action_cancel'):
+                current_screen.action_cancel()
+                if signum == getattr(signal, "SIGTERM", None):
+                    self.call_later(
+                        self._begin_signal_shutdown,
+                        current_screen,
+                    )
+            else:
+                self.exit(
+                    result=(
+                        "terminated"
+                        if signum == getattr(signal, "SIGTERM", None)
+                        else "cancelled"
+                    )
+                )
         
         # Handle common signals - only use signals available on current platform
         signals_to_handle = []
@@ -50,12 +137,6 @@ class SharpFramesApp(App):
         for signal_attr in ['SIGTERM', 'SIGINT']:
             if hasattr(signal, signal_attr):
                 signals_to_handle.append(getattr(signal, signal_attr))
-        
-        # Unix/Linux specific signals (not available on Windows)
-        if os.name == 'posix':
-            for signal_attr in ['SIGUSR1', 'SIGUSR2', 'SIGHUP', 'SIGPIPE']:
-                if hasattr(signal, signal_attr):
-                    signals_to_handle.append(getattr(signal, signal_attr))
         
         for sig in signals_to_handle:
             try:
@@ -134,7 +215,7 @@ class SharpFramesApp(App):
         
         # If we just had escape sequences recently, this is likely spurious
         if current_time - self._last_escape_time < 2.0:  # Within 2 seconds of escape detection
-            self.log.info(f"Blocking cancel action - likely triggered by spurious escape sequence")
+            self.log.info("Blocking cancel action - likely triggered by spurious escape sequence")
             return
         
         self._last_action_time = current_time
@@ -214,10 +295,6 @@ class SharpFramesApp(App):
     def _get_target_input_for_step(self, config_screen: ConfigurationForm, file_path: str) -> str:
         """Determine which input field should receive the file path."""
         current_step = config_screen.get_current_step_name()
-        
-        # Check what type of path this is (Windows-safe)
-        is_directory = os.path.isdir(file_path) if os.path.exists(file_path) else file_path.endswith(('/', '\\'))
-        is_video = any(file_path.lower().endswith(ext) for ext in ['.mp4', '.avi', '.mov', '.mkv', '.webm', '.m4v'])
         
         # Normalize path separators for consistent handling
         file_path = os.path.normpath(file_path)

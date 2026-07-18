@@ -9,6 +9,7 @@ from textual.containers import Container, Horizontal, Vertical
 from textual.widgets import Label, Input, Select, RadioSet, RadioButton, Checkbox, Static
 
 from ..constants import UIElementIds, InputTypes
+from ..keyboard import OptionSelect
 from .validators import (
     IntRangeValidator, 
     VideoFileValidator, 
@@ -158,17 +159,22 @@ class InputPathStepHandler(StepHandler):
                 return False
             
             input_type = screen.config_data.get("input_type", "video")
-            
+
             if input_type == "video":
                 if not os.path.isfile(expanded_path):
                     screen.query_one("#step-description").update("Path must be a video file")
                     return False
-                # Could add video format validation here
+                from ...video_utils import is_video_file
+                if not is_video_file(expanded_path):
+                    screen.query_one("#step-description").update(
+                        "File is not a recognizable supported video"
+                    )
+                    return False
             else:  # directory types
                 if not os.path.isdir(expanded_path):
                     screen.query_one("#step-description").update("Path must be a directory")
                     return False
-            
+
             return True
         except Exception as e:
             screen.query_one("#step-description").update(f"Validation error: {str(e)}")
@@ -350,7 +356,14 @@ class OutputFormatStepHandler(StepHandler):
         ]
         
         options = [(desc, fmt) for fmt, desc in formats]
-        container.mount(Select(options, value="jpg", id="format-select", classes="field-select"))
+        container.mount(
+            OptionSelect(
+                options,
+                value="jpg",
+                id="format-select",
+                classes="field-select",
+            )
+        )
     
     def validate(self, screen) -> bool:
         """Validate output format."""

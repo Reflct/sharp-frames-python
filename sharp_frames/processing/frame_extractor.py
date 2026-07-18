@@ -6,11 +6,23 @@ import os
 import tempfile
 import subprocess
 import shutil
-from typing import List, Dict, Any, Optional
+import json
+import threading
+import time
+from collections import deque
+from typing import List, Dict, Any, Optional, TYPE_CHECKING
 from pathlib import Path
 
 from ..models.frame_data import FrameData, ExtractionResult
-from ..video_utils import get_video_files_in_directory
+from ..video_utils import (
+    SUPPORTED_IMAGE_EXTENSIONS,
+    get_ffmpeg_installation_hint,
+    get_video_files_in_directory,
+    natural_path_key,
+)
+
+if TYPE_CHECKING:
+    from .colorspace import VideoColorInfo
 
 
 class FrameExtractor:
@@ -18,10 +30,27 @@ class FrameExtractor:
     
     def __init__(self):
         """Initialize FrameExtractor."""
-        self.SUPPORTED_IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff'}
+        self.SUPPORTED_IMAGE_EXTENSIONS = SUPPORTED_IMAGE_EXTENSIONS
+        self.progress_callback = None
+        self._cancellation_event = threading.Event()
+        self._process_lock = threading.Lock()
+        self._active_process: Optional[subprocess.Popen] = None
+
+    def cancel_processing(self) -> None:
+        """Request cancellation without blocking the caller."""
+        self._cancellation_event.set()
+
+    def reset_cancellation(self) -> None:
+        """Prepare this extractor for an explicitly requested new operation."""
+        with self._process_lock:
+            if self._active_process is not None and self._active_process.poll() is None:
+                raise RuntimeError("Cannot reset cancellation while extraction is active")
+            self._cancellation_event.clear()
         
     def extract_frames(self, config: Dict[str, Any], progress_callback=None) -> ExtractionResult:
         """Extract/load frames based on input type."""
+        if self._cancellation_event.is_set():
+            raise RuntimeError("Frame extraction cancelled")
         input_type = config.get('input_type')
         self.progress_callback = progress_callback
         
@@ -67,21 +96,32 @@ class FrameExtractor:
     
     def _extract_video_frames(self, config: Dict[str, Any]) -> ExtractionResult:
         """Extract frames from single video file."""
+        from .colorspace import get_color_info_description
+
         video_path = config['input_path']
         fps = config.get('fps', 10)
         output_format = config.get('output_format', 'jpg')
         width = config.get('width', 0)
-        
+
         # Create temporary directory for extraction
         temp_dir = self._create_temp_directory()
-        
+
         try:
-            # Extract video info
+            # Extract video info (includes color space data)
             video_info = self._get_video_info(video_path)
             duration = self._extract_duration_from_info(video_info)
-            
-            # Perform FFmpeg extraction
-            if not self._run_ffmpeg_extraction(video_path, temp_dir, fps, output_format, width, duration):
+
+            # Extract color space from existing video_info (no extra ffprobe call)
+            color_info = self._extract_color_info_from_video_info(video_info)
+            if color_info.needs_conversion:
+                color_desc = get_color_info_description(color_info)
+                self._notify_progress(
+                    "extraction", 0, 0,
+                    f"Detected {color_desc}, will convert to sRGB",
+                )
+
+            # Perform FFmpeg extraction with color space handling
+            if not self._run_ffmpeg_extraction(video_path, temp_dir, fps, output_format, width, duration, color_info):
                 raise RuntimeError("Frame extraction failed")
             
             # Get extracted frame paths
@@ -124,7 +164,6 @@ class FrameExtractor:
         video_directory = config['input_path']
         fps = config.get('fps', 10)
         output_format = config.get('output_format', 'jpg')
-        width = config.get('width', 0)
         
         # Get video files
         video_files = get_video_files_in_directory(video_directory)
@@ -145,8 +184,9 @@ class FrameExtractor:
             successful_videos = 0
             
             for video_index, video_path in enumerate(video_files):
-                video_name = f"video_{video_index + 1:03d}"
-                
+                if self._cancellation_event.is_set():
+                    raise RuntimeError("Frame extraction cancelled")
+
                 try:
                     # Extract frames from this video
                     video_frames = self._extract_single_video(
@@ -162,8 +202,14 @@ class FrameExtractor:
                     successful_videos += 1
                     
                 except Exception as e:
+                    if self._cancellation_event.is_set():
+                        raise RuntimeError("Frame extraction cancelled") from e
                     print(f"Warning: Failed to extract frames from {os.path.basename(video_path)}: {e}")
                     continue
+
+            if not all_frames:
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                temp_dir = None
             
             metadata = {
                 'video_count': len(video_files),
@@ -192,17 +238,20 @@ class FrameExtractor:
         video_name = f"video_{video_index + 1:03d}"
         video_temp_dir = os.path.join(temp_dir, video_name)
         os.makedirs(video_temp_dir, exist_ok=True)
-        
+
         fps = config.get('fps', 10)
         output_format = config.get('output_format', 'jpg')
         width = config.get('width', 0)
-        
-        # Get video info
+
+        # Get video info (includes color space data)
         video_info = self._get_video_info(video_path)
         duration = self._extract_duration_from_info(video_info)
-        
-        # Extract frames
-        if not self._run_ffmpeg_extraction(video_path, video_temp_dir, fps, output_format, width, duration):
+
+        # Extract color space from existing video_info (no extra ffprobe call)
+        color_info = self._extract_color_info_from_video_info(video_info)
+
+        # Extract frames with color space handling
+        if not self._run_ffmpeg_extraction(video_path, video_temp_dir, fps, output_format, width, duration, color_info):
             raise RuntimeError(f"Failed to extract frames from {video_path}")
         
         # Get extracted frame files
@@ -256,8 +305,7 @@ class FrameExtractor:
         except OSError as e:
             raise FileNotFoundError(f"Could not scan directory {directory}: {e}")
         
-        # Sort for consistent ordering
-        image_files.sort()
+        image_files.sort(key=natural_path_key)
         return image_files
     
     def _get_image_output_name(self, image_path: str) -> str:
@@ -275,21 +323,25 @@ class FrameExtractor:
             ffprobe_executable = 'ffprobe.exe' if os.name == 'nt' else 'ffprobe'
             
             cmd = [
-                ffprobe_executable, '-v', 'quiet', '-print_format', 'json',
+                ffprobe_executable, '-v', 'error', '-print_format', 'json',
                 '-show_format', '-show_streams', os.path.normpath(video_path)
             ]
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
             
             if result.returncode != 0:
-                raise RuntimeError(f"FFprobe failed: {result.stderr}")
+                detail = result.stderr.strip() or (
+                    f"exit code {result.returncode} while probing {video_path}"
+                )
+                raise RuntimeError(f"FFprobe failed: {detail}")
             
-            import json
             return json.loads(result.stdout)
             
         except subprocess.TimeoutExpired:
             raise RuntimeError(f"FFprobe timeout for {video_path}")
         except FileNotFoundError:
-            raise RuntimeError("FFprobe not found. Please install FFmpeg.")
+            raise RuntimeError(
+                f"FFprobe not found. {get_ffmpeg_installation_hint()}"
+            )
         except json.JSONDecodeError as e:
             raise RuntimeError(f"Invalid JSON from FFprobe: {e}")
     
@@ -298,30 +350,76 @@ class FrameExtractor:
         try:
             format_info = video_info.get('format', {})
             duration_str = format_info.get('duration')
-            return float(duration_str) if duration_str else None
+            if duration_str:
+                return float(duration_str)
+            for stream in video_info.get('streams', []):
+                if stream.get('codec_type') == 'video' and stream.get('duration'):
+                    return float(stream['duration'])
+            return None
         except (ValueError, TypeError):
             return None
+
+    def _extract_color_info_from_video_info(self, video_info: Dict[str, Any]) -> 'VideoColorInfo':
+        """Extract color space info from existing video_info (avoids extra ffprobe call)."""
+        from .colorspace import parse_color_info_from_stream, VideoColorInfo, ColorPrimaries, TransferFunction, ColorMatrix
+
+        streams = video_info.get('streams', [])
+        # Find the first video stream
+        for stream in streams:
+            if stream.get('codec_type') == 'video':
+                return parse_color_info_from_stream(stream)
+
+        # No video stream found, return default
+        return VideoColorInfo(
+            color_primaries=ColorPrimaries.UNKNOWN,
+            transfer_function=TransferFunction.UNKNOWN,
+            color_matrix=ColorMatrix.UNKNOWN,
+            is_hdr=False
+        )
     
-    def _run_ffmpeg_extraction(self, video_path: str, output_dir: str, fps: int, 
-                              output_format: str, width: int, duration: Optional[float] = None) -> bool:
-        """Run FFmpeg to extract frames from video with progress monitoring."""
+    @staticmethod
+    def _build_video_filters(
+        fps: int,
+        width: int,
+        color_info: Optional['VideoColorInfo'] = None,
+    ) -> List[str]:
+        """Build an efficient, color-correct FFmpeg filter sequence."""
+        from .colorspace import build_colorspace_filter
+
+        filters = [f"fps={fps}"]
+        resize_consumed = False
+
+        if color_info is not None:
+            colorspace_filter = build_colorspace_filter(
+                color_info,
+                width=width if color_info.is_hdr else 0,
+            )
+            if colorspace_filter:
+                filters.append(colorspace_filter)
+                resize_consumed = color_info.is_hdr and width > 0
+
+        if width > 0 and not resize_consumed:
+            filters.append(f"scale={width}:-1:flags=lanczos")
+
+        return filters
+
+    def _run_ffmpeg_extraction(self, video_path: str, output_dir: str, fps: int,
+                              output_format: str, width: int, duration: Optional[float] = None,
+                              color_info: Optional['VideoColorInfo'] = None) -> bool:
+        """Run FFmpeg to extract frames from video with progress monitoring and color space conversion."""
         output_pattern = os.path.join(output_dir, f"frame_%05d.{output_format}")
-        
-        # Build video filters
-        vf_filters = [f"fps={fps}"]
-        if width > 0:
-            # Use lanczos scaling for high-quality downsampling
-            vf_filters.append(f"scale={width}:-1:flags=lanczos")
-        
-        vf_string = ",".join(vf_filters)
+        vf_string = ",".join(self._build_video_filters(fps, width, color_info))
         
         # Use proper executable name based on platform
         ffmpeg_executable = 'ffmpeg.exe' if os.name == 'nt' else 'ffmpeg'
         
         # Build FFmpeg command - normalize paths for Windows
         cmd = [
-            ffmpeg_executable, 
-            '-hwaccel', 'auto',  # Auto-detect and use available hardware acceleration
+            ffmpeg_executable,
+            '-hide_banner',
+            '-loglevel', 'error',
+            '-nostats',
+            '-progress', 'pipe:1',
             '-i', os.path.normpath(video_path),
             '-vf', vf_string,
         ]
@@ -335,139 +433,185 @@ class FrameExtractor:
             os.path.normpath(output_pattern)
         ])
         
+        estimated_total = int(duration * fps) if duration and fps else 0
+        self._report_extraction_started(fps, estimated_total)
+        timeout = max(300, int(duration * 10)) if duration else 3600
+        stderr_lines = deque(maxlen=500)
+        process = None
+        progress_thread = None
+        stderr_thread = None
+
         try:
-            # Estimate total frames if duration is available
-            estimated_total = 0
-            if duration and fps:
-                estimated_total = int(duration * fps)
-                if self.progress_callback:
-                    self.progress_callback("extraction", 0, estimated_total, f"Extracting frames at {fps}fps")
-            else:
-                if self.progress_callback:
-                    self.progress_callback("extraction", 0, 0, "Extracting frames (unknown total)")
-            
-            # Set timeout based on duration if available
-            timeout = 3600  # 1 hour default
-            if duration:
-                # Rough estimation: 10 seconds per minute of video
-                timeout = max(300, int(duration * 10))
-            
-            # Start FFmpeg process for progress monitoring
-            import threading
-            import time
-            
-            # Windows-specific process creation flags
-            creation_flags = 0
-            if os.name == 'nt':
-                # On Windows, create new process group and hide console window
-                creation_flags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
-            
-            process = subprocess.Popen(
-                cmd, 
-                stdout=subprocess.PIPE, 
-                stderr=subprocess.PIPE, 
-                text=True,
-                creationflags=creation_flags if os.name == 'nt' else 0
+            process = self._start_ffmpeg_process(cmd)
+            with self._process_lock:
+                self._active_process = process
+
+            progress_thread = threading.Thread(
+                target=self._read_ffmpeg_progress,
+                args=(process.stdout, estimated_total),
+                name="sharp-frames-ffmpeg-progress",
+                daemon=True,
             )
-            
-            # Monitor progress by counting extracted files
-            last_file_count = 0
-            start_time = time.time()
-            last_progress_time = start_time  # Track when we last saw progress
-            stall_timeout = 10.0  # Consider stalled if no progress for 10 seconds
-            
-            while process.poll() is None:
-                current_time = time.time()
-                elapsed = current_time - start_time
-                
-                # Check for timeout
-                if elapsed > timeout:
-                    process.kill()
-                    raise subprocess.TimeoutExpired(cmd, timeout)
-                
-                # Count extracted files
-                if os.path.exists(output_dir):
-                    try:
-                        file_count = len([f for f in os.listdir(output_dir) if f.startswith('frame_')])
-                        
-                        if file_count > last_file_count:
-                            # We have new frames, update progress time
-                            last_progress_time = current_time
-                            
-                            if self.progress_callback:
-                                if estimated_total:
-                                    self.progress_callback("extraction", file_count, estimated_total, 
-                                                        f"Extracted {file_count}/{estimated_total} frames")
-                                else:
-                                    self.progress_callback("extraction", file_count, 0, f"Extracted {file_count} frames")
-                            last_file_count = file_count
-                            
-                            # Check if we've reached the expected total
-                            if estimated_total > 0 and file_count >= estimated_total:
-                                process.terminate()
-                                break
-                        
-                        # Check for stalled extraction (prevents hanging on Windows)
-                        if current_time - last_progress_time > stall_timeout:
-                            process.terminate()
-                            break
-                    except Exception:
-                        pass  # Continue if file counting fails
-                
-                time.sleep(0.1)  # Small delay to avoid excessive polling
-            
-            # Ensure process is terminated and wait for it to finish
-            if process.poll() is None:
-                process.terminate()
-                try:
-                    # Wait up to 5 seconds for graceful termination
-                    stdout, stderr = process.communicate(timeout=5)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    stdout, stderr = process.communicate()
-            else:
-                # Process already finished, get results
-                stdout, stderr = process.communicate()
-            
-            # Check if extraction was successful based on frame count
-            # Don't rely on return code since we may have terminated the process
-            if os.path.exists(output_dir):
-                actual_frame_count = len([f for f in os.listdir(output_dir) if f.startswith('frame_')])
-                
-                # Consider successful if we have frames and either:
-                # 1. We reached the expected count, or
-                # 2. We have a reasonable number of frames (at least 10)
-                success = actual_frame_count > 0 and (
-                    (estimated_total > 0 and actual_frame_count >= estimated_total * 0.95) or  # Allow 5% tolerance
-                    actual_frame_count >= 10
-                )
-                
-                if not success:
-                    print(f"FFmpeg extraction incomplete: {actual_frame_count} frames")
-                    if stderr:
-                        print(f"FFmpeg stderr: {stderr}")
-                    return False
-            else:
+            stderr_thread = threading.Thread(
+                target=self._drain_stream,
+                args=(process.stderr, stderr_lines),
+                name="sharp-frames-ffmpeg-stderr",
+                daemon=True,
+            )
+            progress_thread.start()
+            stderr_thread.start()
+
+            return_code = self._wait_for_process(process, cmd, timeout)
+            progress_thread.join(timeout=2)
+            stderr_thread.join(timeout=2)
+            stderr = "".join(stderr_lines).strip()
+
+            if self._cancellation_event.is_set():
+                print(f"FFmpeg extraction cancelled for {video_path}")
                 return False
-            
-            # Final progress update
-            if os.path.exists(output_dir):
-                final_frame_count = len([f for f in os.listdir(output_dir) if f.startswith('frame_')])
-                if self.progress_callback:
-                    self.progress_callback("extraction", final_frame_count, final_frame_count, 
-                                        f"Extraction complete: {final_frame_count} frames")
-            
+            if return_code != 0:
+                print(f"FFmpeg extraction failed with exit code {return_code}")
+                if stderr:
+                    print(f"FFmpeg stderr: {stderr}")
+                return False
+
+            final_frame_count = len(self._get_extracted_frame_files(output_dir))
+            if final_frame_count == 0:
+                print("FFmpeg completed successfully but produced no frames")
+                return False
+
+            self._notify_progress(
+                "extraction",
+                final_frame_count,
+                final_frame_count,
+                f"Extraction complete: {final_frame_count} frames",
+            )
             return True
-            
-        except subprocess.TimeoutExpired as e:
+
+        except subprocess.TimeoutExpired:
+            if process is not None:
+                self._terminate_process(process)
             print(f"FFmpeg extraction timeout for {video_path}")
             return False
-        except FileNotFoundError as e:
-            print("FFmpeg not found. Please install FFmpeg.")
+        except FileNotFoundError:
+            print(f"FFmpeg not found. {get_ffmpeg_installation_hint()}")
             return False
         except Exception as e:
+            if process is not None:
+                self._terminate_process(process)
             print(f"Unexpected error during frame extraction: {e}")
             return False
+        finally:
+            if process is not None and process.poll() is None:
+                self._terminate_process(process)
+            if progress_thread is not None:
+                progress_thread.join(timeout=2)
+            if stderr_thread is not None:
+                stderr_thread.join(timeout=2)
+            with self._process_lock:
+                if self._active_process is process:
+                    self._active_process = None
+
+    def _start_ffmpeg_process(self, command: List[str]) -> subprocess.Popen:
+        """Start FFmpeg with pipes that are drained by dedicated reader threads."""
+        creation_flags = 0
+        if os.name == 'nt':
+            creation_flags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
+        return subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+            creationflags=creation_flags,
+        )
+
+    def _wait_for_process(self, process: subprocess.Popen, command: List[str], timeout: int) -> int:
+        """Wait for FFmpeg while honoring cancellation and a whole-job timeout."""
+        deadline = time.monotonic() + timeout
+        while True:
+            if self._cancellation_event.is_set():
+                self._terminate_process(process)
+                return process.returncode if process.returncode is not None else -1
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired(command, timeout)
+            try:
+                return process.wait(timeout=min(0.2, remaining))
+            except subprocess.TimeoutExpired:
+                continue
+
+    @staticmethod
+    def _terminate_process(process: subprocess.Popen) -> None:
+        """Terminate a child process, escalating to kill if it does not exit."""
+        if process.poll() is not None:
+            return
+        try:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    # A pathological platform/process wrapper may not report
+                    # exit even after a force kill. Cleanup remains best-effort
+                    # and must not mask the original cancellation or timeout.
+                    return
+        except (OSError, ProcessLookupError):
+            # Another thread may have completed termination concurrently.
+            return
+
+    def _read_ffmpeg_progress(self, stream, estimated_total: int) -> None:
+        """Read FFmpeg's machine-readable progress stream until EOF."""
+        if stream is None:
+            return
+        for line in iter(stream.readline, ''):
+            key, separator, value = line.strip().partition('=')
+            if separator and key == 'frame':
+                try:
+                    frame_count = int(value)
+                except ValueError:
+                    continue
+                total = estimated_total or 0
+                description = (
+                    f"Extracted {frame_count}/{total} frames"
+                    if total
+                    else f"Extracted {frame_count} frames"
+                )
+                self._notify_progress(
+                    "extraction", frame_count, total, description
+                )
+
+    @staticmethod
+    def _drain_stream(stream, destination) -> None:
+        """Continuously drain a text stream to prevent pipe backpressure."""
+        if stream is None:
+            return
+        for line in iter(stream.readline, ''):
+            destination.append(line)
+
+    def _report_extraction_started(self, fps: int, estimated_total: int) -> None:
+        if estimated_total:
+            message = f"Extracting frames at {fps}fps"
+        else:
+            message = "Extracting frames (unknown total)"
+        self._notify_progress("extraction", 0, estimated_total, message)
+
+    def _notify_progress(
+        self, phase: str, current: int, total: int, description: str
+    ) -> None:
+        """Report progress without allowing a UI callback to break extraction."""
+        callback = self.progress_callback
+        if callback is None:
+            return
+        try:
+            callback(phase, current, total, description)
+        except Exception as exc:
+            print(f"Warning: Progress callback failed and was disabled: {exc}")
+            if self.progress_callback is callback:
+                self.progress_callback = None
     
     def _get_extracted_frame_files(self, temp_dir: str) -> List[str]:
         """Get list of extracted frame files from temp directory."""
@@ -480,8 +624,7 @@ class FrameExtractor:
         except OSError:
             return []
         
-        # Sort by filename to maintain frame order
-        frame_files.sort()
+        frame_files.sort(key=natural_path_key)
         return frame_files
     
     def _get_supported_image_extensions(self) -> set:

@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=77.0.3", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -10,16 +10,15 @@ readme = "README.md"
 authors = [
     {name = "Reflct.app", email = "info@reflct.app"}
 ]
-license = {text = "MIT"}
-requires-python = ">=3.7"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
 classifiers = [
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.7",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
-    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Operating System :: OS Independent",
     "Topic :: Multimedia :: Video",
     "Topic :: Multimedia :: Graphics",
@@ -30,13 +29,15 @@ dependencies = [
     "opencv-python>=4.5.0",
     "numpy>=1.19.0",
     "tqdm>=4.64.0",
-    "textual>=0.41.0",
+    "textual>=5.0.0",
+    "textual-image>=0.12.0,<0.13.0",
+    "Pillow>=9.0.0",
 ]
 
 [project.urls]
 Homepage = "https://github.com/reflct/sharp-frames-python"
 Documentation = "https://github.com/reflct/sharp-frames-python#readme"
-Changelog = "https://github.com/reflct/sharp-frames-python/blob/main/CHANGELOG.md"
+Changelog = "https://github.com/reflct/sharp-frames-python/blob/master/CHANGELOG.md"
 
 [project.scripts]
 sharp-frames = "sharp_frames.sharp_frames:main"
@@ -44,7 +45,7 @@ sharp-frames = "sharp_frames.sharp_frames:main"
 # External dependencies that cannot be installed automatically by pip
 [tool.sharp-frames.external-dependencies]
 ffmpeg = {description = "Required for video processing", url = "https://ffmpeg.org/download.html"}
-ffprobe = {description = "Recommended for video duration detection (included with FFmpeg)", url = "https://ffmpeg.org/download.html"}
+ffprobe = {description = "Required for video stream metadata (included with FFmpeg)", url = "https://ffmpeg.org/download.html"}
 
 [tool.setuptools]
 package-dir = {"" = "."}
@@ -53,4 +54,4 @@ package-dir = {"" = "."}
 version = {attr = "sharp_frames.__version__"}
 
 [tool.setuptools.packages.find]
-include = ["sharp_frames", "sharp_frames.*"] 
+include = ["sharp_frames", "sharp_frames.*"]

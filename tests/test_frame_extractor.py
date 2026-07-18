@@ -15,10 +15,8 @@ from tests.fixtures import (
     test_video_file, 
     test_video_directory,
     sample_config_video,
-    sample_config_directory, 
+    sample_config_directory,
     sample_config_video_directory,
-    mock_ffmpeg_success,
-    mock_ffmpeg_failure
 )
 
 
@@ -34,7 +32,7 @@ class TestFrameExtractor:
         assert self.extractor is not None
         assert hasattr(self.extractor, 'extract_frames')
     
-    def test_extract_frames_video_type(self, sample_config_video, mock_ffmpeg_success):
+    def test_extract_frames_video_type(self, sample_config_video):
         """Test frame extraction from video file."""
         config = sample_config_video.copy()
         config['input_type'] = 'video'
@@ -70,7 +68,7 @@ class TestFrameExtractor:
             mock_load.assert_called_once_with(config['input_path'])
             assert result.input_type == 'directory'
     
-    def test_extract_frames_video_directory_type(self, sample_config_video_directory, mock_ffmpeg_success):
+    def test_extract_frames_video_directory_type(self, sample_config_video_directory):
         """Test frame extraction from video directory."""
         config = sample_config_video_directory.copy()
         config['input_type'] = 'video_directory'
@@ -132,13 +130,24 @@ class TestFrameExtractor:
         with pytest.raises(FileNotFoundError):
             self.extractor._load_images("/nonexistent/directory")
     
-    def test_extract_video_frames_success(self, sample_config_video, mock_ffmpeg_success):
+    def test_extract_video_frames_success(self, sample_config_video):
         """Test successful video frame extraction."""
         config = sample_config_video.copy()
         
+        video_info = {
+            'format': {'duration': '1.0'},
+            'streams': [{'codec_type': 'video'}],
+        }
+
+        extracted_paths = [
+            '/tmp/test_frames/frame_00001.jpg',
+            '/tmp/test_frames/frame_00002.jpg',
+        ]
+
         with patch('tempfile.mkdtemp', return_value='/tmp/test_frames'), \
-             patch('os.listdir', return_value=['frame_00001.jpg', 'frame_00002.jpg']), \
-             patch('os.path.isfile', return_value=True):
+             patch.object(self.extractor, '_get_video_info', return_value=video_info), \
+             patch.object(self.extractor, '_get_extracted_frame_files', return_value=extracted_paths), \
+             patch.object(self.extractor, '_run_ffmpeg_extraction', return_value=True) as extract:
             
             result = self.extractor._extract_video_frames(config)
             
@@ -147,18 +156,24 @@ class TestFrameExtractor:
             assert result.temp_dir == '/tmp/test_frames'
             assert len(result.frames) == 2
             
-            # Verify FFmpeg was called
-            mock_ffmpeg_success['run'].assert_called_once()
+            extract.assert_called_once()
     
-    def test_extract_video_frames_ffmpeg_failure(self, sample_config_video, mock_ffmpeg_failure):
+    def test_extract_video_frames_ffmpeg_failure(self, sample_config_video):
         """Test handling of FFmpeg extraction failure."""
         config = sample_config_video.copy()
         
-        with patch('tempfile.mkdtemp', return_value='/tmp/test_frames'):
+        video_info = {
+            'format': {'duration': '1.0'},
+            'streams': [{'codec_type': 'video'}],
+        }
+
+        with patch('tempfile.mkdtemp', return_value='/tmp/test_frames'), \
+             patch.object(self.extractor, '_get_video_info', return_value=video_info), \
+             patch.object(self.extractor, '_run_ffmpeg_extraction', return_value=False):
             with pytest.raises(RuntimeError, match="Frame extraction failed"):
                 self.extractor._extract_video_frames(config)
     
-    def test_extract_video_directory_frames_success(self, sample_config_video_directory, test_video_directory, mock_ffmpeg_success):
+    def test_extract_video_directory_frames_success(self, sample_config_video_directory, test_video_directory):
         """Test successful video directory frame extraction with video attribution."""
         config = sample_config_video_directory.copy()
         video_dir, video_files = test_video_directory
@@ -234,7 +249,7 @@ class TestFrameExtractor:
         assert frame_data.sharpness_score == 150.0
         assert frame_data.source_video == "video_001"
         assert frame_data.source_index == 5
-        assert frame_data.output_name == "video01_00006"  # source_index + 1, zero-padded
+        assert frame_data.output_name == "video001_00006"
     
     def test_temp_directory_management(self):
         """Test temporary directory creation and tracking."""

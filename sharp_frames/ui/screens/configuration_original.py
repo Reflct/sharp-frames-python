@@ -246,7 +246,7 @@ class ConfigurationForm(Screen):
         select_widget = Select([
             ("Best N frames - Choose a specific number of frames", "best-n"),
             ("Batched selection - Best frame from each batch", "batched"),
-            ("Outlier removal - Remove the blurriest frames", "outlier-removal")
+            ("Outlier detection - Reject local sharpness outliers", "outlier-removal")
         ], value=self.config_data.get("selection_method", "best-n"), id="selection-method-field")
         container.mount(select_widget)
         
@@ -306,17 +306,17 @@ class ConfigurationForm(Screen):
             input1.focus()
             
         elif method == "outlier-removal":
-            container.mount(Label("Outlier Removal Configuration:", classes="question"))
+            container.mount(Label("Outlier Detection Configuration:", classes="question"))
             container.mount(Label("Window size for comparison:"))
             input1 = Input(
                 value=str(self.config_data.get("outlier_window_size", 15)),
-                validators=[IntRangeValidator(min_value=3, max_value=30)],
+                validators=[IntRangeValidator(min_value=5, max_value=31)],
                 id="param1"
             )
             container.mount(input1)
             container.mount(Label("Sensitivity (0-100, higher = more aggressive):"))
             input2 = Input(
-                value=str(self.config_data.get("outlier_sensitivity", 50)),
+                value=str(self.config_data.get("outlier_sensitivity", 60)),
                 validators=[IntRangeValidator(min_value=0, max_value=100)],
                 id="param2"
             )
@@ -387,7 +387,7 @@ class ConfigurationForm(Screen):
             lines.append(f"  Batch buffer: {self.config_data.get('batch_buffer', 2)}")
         elif method == "outlier-removal":
             lines.append(f"  Window size: {self.config_data.get('outlier_window_size', 15)}")
-            lines.append(f"  Sensitivity: {self.config_data.get('outlier_sensitivity', 50)}")
+            lines.append(f"  Sensitivity: {self.config_data.get('outlier_sensitivity', 60)}")
         
         # Only show output format and resize options for non-directory modes
         input_type = self.config_data.get("input_type", InputTypes.VIDEO)
@@ -559,8 +559,8 @@ class ConfigurationForm(Screen):
                     elif method == "outlier-removal":
                         window_size = int(value1)
                         sensitivity = int(value2)
-                        if window_size < 3:
-                            self._show_error(step_container, "Window size must be at least 3")
+                        if window_size < 5:
+                            self._show_error(step_container, "Window size must be at least 5")
                             return False
                         if sensitivity < 0 or sensitivity > 100:
                             self._show_error(step_container, "Sensitivity must be between 0 and 100")
@@ -691,7 +691,7 @@ class ConfigurationForm(Screen):
         config["batch_size"] = 5
         config["batch_buffer"] = 2
         config["outlier_window_size"] = 15
-        config["outlier_sensitivity"] = 50
+        config["outlier_sensitivity"] = 60
         
         # Override with method-specific values
         if selection_method == "best-n":
@@ -702,6 +702,6 @@ class ConfigurationForm(Screen):
             config["batch_buffer"] = self.config_data.get("batch_buffer", 2)
         elif selection_method == "outlier-removal":
             config["outlier_window_size"] = self.config_data.get("outlier_window_size", 15)
-            config["outlier_sensitivity"] = self.config_data.get("outlier_sensitivity", 50)
+            config["outlier_sensitivity"] = self.config_data.get("outlier_sensitivity", 60)
         
-        return config 
+        return config
