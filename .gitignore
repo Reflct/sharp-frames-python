@@ -19,6 +19,9 @@ venv/
 env/
 .env/
 
+# Local secrets
+.env
+
 # Pip installation artifacts
 pip-wheel-metadata/
 pip-log.txt
