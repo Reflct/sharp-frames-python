@@ -152,12 +152,17 @@ class AsciiTitleShimmer(Static):
         )
 
     def _advance_frame(self) -> None:
-        """Show the next frame and stop the interval after the last one."""
+        """Show the next frame and stop the interval after the last one.
+
+        A tick that was already queued when the timer stopped may still
+        invoke this callback once more, so it no-ops after the last frame.
+        """
+        if self._next_frame_index > len(self.frames) - 1:
+            return
         self._show_frame(self._next_frame_index)
         if self._next_frame_index >= len(self.frames) - 1:
             self._shimmer_timer.stop()
-        else:
-            self._next_frame_index += 1
+        self._next_frame_index += 1
 
     def _show_frame(self, frame_index: int) -> None:
         """Swap colour spans without recalculating the stable title layout."""
